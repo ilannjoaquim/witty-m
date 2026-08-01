@@ -1,0 +1,7 @@
+# Instance Mautic locale de test (~350 Mo, installee par dev/setup-mautic.sh)
+/mautic-dev/
+
+# Paquets generes pour l'import dans Mautic
+/*.zip
+
+.claude/
