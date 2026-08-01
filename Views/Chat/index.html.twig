@@ -1,0 +1,131 @@
+{% extends '@MauticCore/Default/content.html.twig' %}
+
+{% block headerTitle %}{{ 'mautic.witty.chat.header'|trans }}{% endblock %}
+
+{% block content %}
+<style>
+    #witty-app { display: flex; flex-direction: column; height: calc(100vh - 200px); min-height: 420px; }
+    #witty-log { flex: 1; overflow-y: auto; padding: 16px; background: #fff; border: 1px solid #e0e0e0; border-radius: 4px; }
+    .witty-msg { max-width: 78%; margin-bottom: 14px; padding: 10px 14px; border-radius: 10px; line-height: 1.5; white-space: pre-wrap; word-wrap: break-word; }
+    .witty-msg.user { margin-left: auto; background: #4e5e9e; color: #fff; }
+    .witty-msg.bot { background: #f2f4f8; color: #2b2b2b; }
+    .witty-msg.error { background: #fdecea; color: #a5261c; border: 1px solid #f5c6c2; }
+    .witty-trace { margin: 6px 0 14px; font-size: 12px; color: #6b7280; }
+    .witty-chip { display: inline-block; margin: 2px 4px 2px 0; padding: 2px 8px; border-radius: 10px; background: #eef1f6; border: 1px solid #dfe3ea; }
+    .witty-chip.error { background: #fdecea; border-color: #f5c6c2; color: #a5261c; }
+    #witty-form { display: flex; gap: 8px; margin-top: 12px; }
+    #witty-input { flex: 1; resize: none; }
+</style>
+
+<div id="witty-app"
+     data-endpoint="{{ path('witty_chat_send') }}"
+     data-configured="{{ isConfigured ? '1' : '0' }}">
+
+    {% if not isConfigured %}
+        <div class="alert alert-warning">{{ 'mautic.witty.chat.not_configured'|trans }}</div>
+    {% else %}
+        <p class="text-muted small">{{ provider }} &middot; {{ model }}</p>
+    {% endif %}
+
+    <div id="witty-log"></div>
+
+    <div id="witty-form">
+        <textarea id="witty-input" class="form-control" rows="2"
+                  placeholder="{{ 'mautic.witty.chat.placeholder'|trans }}"
+                  {{ isConfigured ? '' : 'disabled' }}></textarea>
+        <button id="witty-send" class="btn btn-primary" {{ isConfigured ? '' : 'disabled' }}>
+            {{ 'mautic.witty.chat.send'|trans }}
+        </button>
+    </div>
+</div>
+
+<script>
+(function () {
+    var app = document.getElementById('witty-app');
+    if (!app || app.dataset.wittyReady === '1') { return; }
+    app.dataset.wittyReady = '1';
+
+    var endpoint = app.dataset.endpoint;
+    var log      = document.getElementById('witty-log');
+    var input    = document.getElementById('witty-input');
+    var send     = document.getElementById('witty-send');
+
+    // Le transcript vit cote client : l'API des trois fournisseurs est sans etat,
+    // on renvoie donc l'historique complet a chaque tour.
+    var history = [];
+    var busy    = false;
+
+    function bubble(text, kind) {
+        var el = document.createElement('div');
+        el.className = 'witty-msg ' + kind;
+        el.textContent = text;
+        log.appendChild(el);
+        log.scrollTop = log.scrollHeight;
+        return el;
+    }
+
+    function renderTrace(trace) {
+        if (!trace || !trace.length) { return; }
+        var wrap = document.createElement('div');
+        wrap.className = 'witty-trace';
+        trace.forEach(function (item) {
+            var chip = document.createElement('span');
+            chip.className = 'witty-chip' + (item.status === 'error' ? ' error' : '');
+            chip.textContent = item.label;
+            wrap.appendChild(chip);
+        });
+        log.appendChild(wrap);
+        log.scrollTop = log.scrollHeight;
+    }
+
+    function submit() {
+        var message = input.value.trim();
+        if (!message || busy) { return; }
+
+        busy = true;
+        send.disabled = true;
+        input.value = '';
+        bubble(message, 'user');
+        var pending = bubble('...', 'bot');
+
+        fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+            body: JSON.stringify({ message: message, history: history })
+        })
+        .then(function (response) {
+            return response.json().then(function (data) {
+                return { ok: response.ok, data: data };
+            });
+        })
+        .then(function (result) {
+            pending.remove();
+            if (!result.ok) {
+                bubble(result.data.error || 'Erreur inconnue.', 'error');
+                return;
+            }
+            history = result.data.history || history;
+            renderTrace(result.data.trace);
+            bubble(result.data.reply, 'bot');
+        })
+        .catch(function (error) {
+            pending.remove();
+            bubble('Erreur reseau : ' + error.message, 'error');
+        })
+        .finally(function () {
+            busy = false;
+            send.disabled = false;
+            input.focus();
+        });
+    }
+
+    send.addEventListener('click', submit);
+    input.addEventListener('keydown', function (event) {
+        if (event.key === 'Enter' && !event.shiftKey) {
+            event.preventDefault();
+            submit();
+        }
+    });
+})();
+</script>
+{% endblock %}
