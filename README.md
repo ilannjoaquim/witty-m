@@ -17,28 +17,55 @@ php bin/console cache:clear
 php bin/console mautic:plugins:reload
 ```
 
-Puis **Paramètres › Configuration › Witty** : choisir le fournisseur, coller la clé API,
-éventuellement forcer un modèle. Le chat est ensuite accessible dans le menu principal (`/s/witty`).
+Le `mautic:plugins:reload` (ou le bouton **Installer/Mettre à jour les plugins** dans
+**Paramètres › Plugins**) est obligatoire : c'est lui qui crée la ligne du plugin et celle de
+l'intégration en base. Sans elle, la fiche du plugin n'a rien à afficher.
 
-La clé API est chiffrée via l'`EncryptionHelper` de Mautic avant d'être écrite dans
-`app/config/local.php` (préfixe `witty_enc::`). Une clé déjà saisie en clair reste lisible ;
-elle sera chiffrée à la prochaine sauvegarde du formulaire.
+Puis **Paramètres › Plugins › Witty** :
+
+| Onglet | Contenu |
+|---|---|
+| Details | activation du plugin + clé API |
+| Fonctionnalités | fournisseur, modèle, nombre max d'itérations, confirmation avant écriture |
+
+Enregistrer avec **Sauvegarder et fermer**. Le chat est ensuite accessible dans le menu
+principal (`/s/witty`).
+
+La clé API est stockée dans `plugin_integration_settings.api_keys`, chiffrée par Mautic
+(`IntegrationsHelper::saveIntegrationConfiguration`). Rien n'est écrit dans `local.php`.
 
 ---
 
 ## Architecture
 
 ```
-Config/config.php          routes, menu, paramètres exposés à la config Mautic
-Config/services.php        autowiring + auto-tag des outils (witty.tool)
-EventListener/             ajoute l'onglet "Witty" + chiffre la clé API au pre-save
-Form/Type/ConfigType.php   formulaire de la section de configuration
-Service/WittyConfig.php    lecture centralisée de la config (+ déchiffrement)
+Config/config.php          routes et menu
+Config/services.php        autowiring, auto-tag des outils, alias mautic.integration.witty
+Integration/               intégration Mautic : c'est elle qui rend la fiche du plugin éditable
+Form/Type/                 formulaires des onglets Details (clé API) et Fonctionnalités
+Service/WittyConfig.php    lecture centralisée de la config de l'intégration
 Service/Llm/               3 clients HTTP + normalisation du tool calling
 Service/Agent/             boucle de l'agent + prompt système
 Service/Tool/              registre + outils (une classe = une capacité)
 Controller/                page de chat + endpoint POST
 ```
+
+### Fiche du plugin
+
+Un bundle Mautic sans classe d'intégration n'est pas configurable : `PluginController::indexAction`
+le classe en `isBundle`, la vignette pointe alors vers `mautic_plugin_info` avec `data-footer="false"`,
+d'où une modale qui n'affiche que la description, sans champ ni bouton. Quatre pièces sont nécessaires :
+
+1. `Integration/WittyIntegration.php` — le nom du fichier fait foi : `IntegrationHelper` scanne
+   `Integration/*Integration.php` et en déduit le nom `Witty`, puis crée la ligne en base.
+2. l'alias `mautic.integration.witty` dans `Config/services.php` — clé de service imposée, sinon
+   la classe n'est jamais instanciée.
+3. `Integration/Support/ConfigSupport.php` — `ConfigFormInterface` fait basculer la modale vers
+   `IntegrationsBundle\Controller\ConfigController` (onglets + Sauvegarder / Sauvegarder et fermer),
+   `ConfigFormAuthInterface` et `ConfigFormFeatureSettingsInterface` y branchent les deux formulaires.
+   Le fichier ne doit pas se terminer par `Integration.php`, sinon il serait vu comme une 2ᵉ intégration.
+4. les tags `mautic.basic_integration` / `mautic.config_integration`, posés automatiquement par
+   l'`autoconfigure()` de `Config/services.php`.
 
 ### Couche LLM
 
@@ -93,8 +120,9 @@ sont ceux qui demandent une vérification en priorité :
    exactement le format.
 2. **`iconClass` du menu** (`Config/config.php`) — bascule sur `fa fa-magic` si l'icône Remix
    ne s'affiche pas dans ton thème.
-3. **`formTheme`** — le `ConfigSubscriber` n'en déclare pas. Si le rendu de l'onglet est cassé,
-   ajouter un `formTheme` pointant vers un template de widget dédié.
+3. **Nom de l'intégration** — `Integration/WittyIntegration.php` → intégration `Witty` →
+   service `mautic.integration.witty`. Renommer le fichier sans renommer l'alias de
+   `Config/services.php` casse silencieusement la fiche du plugin (voir ci-dessous).
 
 Les identifiants de modèles par défaut (`WittyConfig::DEFAULT_MODELS`) vieillissent vite :
 renseigner le modèle exact dans la configuration.

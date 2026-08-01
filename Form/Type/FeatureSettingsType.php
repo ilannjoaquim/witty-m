@@ -11,30 +11,46 @@ use Symfony\Component\Form\Extension\Core\Type\ChoiceType;
 use Symfony\Component\Form\Extension\Core\Type\IntegerType;
 use Symfony\Component\Form\Extension\Core\Type\TextType;
 use Symfony\Component\Form\FormBuilderInterface;
+use Symfony\Component\Form\FormEvent;
+use Symfony\Component\Form\FormEvents;
 
-class ConfigType extends AbstractType
+/**
+ * Onglet "Fonctionnalites" de la fiche du plugin.
+ *
+ * Les valeurs sont persistees dans Integration::getFeatureSettings()['integration'].
+ */
+class FeatureSettingsType extends AbstractType
 {
-    public function getBlockPrefix(): string
-    {
-        // Doit correspondre au formAlias declare dans ConfigSubscriber.
-        return 'wittyconfig';
-    }
-
     public function buildForm(FormBuilderInterface $builder, array $options): void
     {
-        $builder->add('witty_provider', ChoiceType::class, [
-            'label'      => 'mautic.witty.config.provider',
-            'choices'    => [
+        // Une integration fraichement installee n'a aucun reglage : on pre-remplit
+        // pour que le formulaire s'ouvre sur des valeurs coherentes.
+        $builder->addEventListener(FormEvents::PRE_SET_DATA, function (FormEvent $event): void {
+            $data = $event->getData();
+            $data = is_array($data) ? $data : [];
+
+            $event->setData($data + [
+                'provider'             => WittyConfig::PROVIDER_ANTHROPIC,
+                'model'                => '',
+                'max_iterations'       => WittyConfig::DEFAULT_MAX_ITERATIONS,
+                'require_confirmation' => true,
+            ]);
+        });
+
+        $builder->add('provider', ChoiceType::class, [
+            'label'       => 'mautic.witty.config.provider',
+            'choices'     => [
                 'Anthropic (Claude)' => WittyConfig::PROVIDER_ANTHROPIC,
                 'OpenAI (GPT)'       => WittyConfig::PROVIDER_OPENAI,
                 'Google (Gemini)'    => WittyConfig::PROVIDER_GEMINI,
             ],
-            'required'   => true,
-            'attr'       => ['class' => 'form-control'],
-            'label_attr' => ['class' => 'control-label'],
+            'required'    => true,
+            'placeholder' => false,
+            'attr'        => ['class' => 'form-control'],
+            'label_attr'  => ['class' => 'control-label'],
         ]);
 
-        $builder->add('witty_model', TextType::class, [
+        $builder->add('model', TextType::class, [
             'label'      => 'mautic.witty.config.model',
             'required'   => false,
             'attr'       => [
@@ -45,31 +61,21 @@ class ConfigType extends AbstractType
             'label_attr' => ['class' => 'control-label'],
         ]);
 
-        $builder->add('witty_api_key', TextType::class, [
-            'label'      => 'mautic.witty.config.api_key',
-            'required'   => false,
-            'attr'       => [
-                'class'        => 'form-control',
-                'autocomplete' => 'off',
-                'tooltip'      => 'mautic.witty.config.api_key.tooltip',
-            ],
-            'label_attr' => ['class' => 'control-label'],
-        ]);
-
-        $builder->add('witty_max_iterations', IntegerType::class, [
+        $builder->add('max_iterations', IntegerType::class, [
             'label'      => 'mautic.witty.config.max_iterations',
             'required'   => false,
             'attr'       => [
                 'class'   => 'form-control',
+                'min'     => 1,
+                'max'     => 20,
                 'tooltip' => 'mautic.witty.config.max_iterations.tooltip',
             ],
             'label_attr' => ['class' => 'control-label'],
         ]);
 
-        $builder->add('witty_require_confirmation', YesNoButtonGroupType::class, [
+        $builder->add('require_confirmation', YesNoButtonGroupType::class, [
             'label' => 'mautic.witty.config.require_confirmation',
             'attr'  => ['tooltip' => 'mautic.witty.config.require_confirmation.tooltip'],
-            'data'  => (bool) ($options['data']['witty_require_confirmation'] ?? true),
         ]);
     }
 }

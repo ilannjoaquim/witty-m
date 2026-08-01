@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Mautic\CoreBundle\DependencyInjection\MauticCoreExtension;
+use MauticPlugin\WittyBundle\Integration\WittyIntegration;
 use MauticPlugin\WittyBundle\Service\Tool\ToolInterface;
 use MauticPlugin\WittyBundle\Service\Tool\ToolRegistry;
 use Symfony\Component\DependencyInjection\Loader\Configurator\ContainerConfigurator;
@@ -28,4 +29,9 @@ return function (ContainerConfigurator $configurator): void {
         ->exclude('../{'.implode(',', array_merge(MauticCoreExtension::DEFAULT_EXCLUDES, $excludes)).'}');
 
     $services->get(ToolRegistry::class)->arg('$tools', tagged_iterator('witty.tool'));
+
+    // Cle de service imposee par IntegrationHelper : mautic.integration.<nom en
+    // minuscules>. Sans cet alias, l'integration n'est pas instanciee et le
+    // plugin retombe sur la fiche descriptive sans formulaire.
+    $services->alias('mautic.integration.witty', WittyIntegration::class)->public();
 };

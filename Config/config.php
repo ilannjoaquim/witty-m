@@ -7,7 +7,7 @@ use MauticPlugin\WittyBundle\Controller\WittyController;
 return [
     'name'        => 'Witty',
     'description' => 'Assistant IA conversationnel capable de piloter Mautic (segments, emails, landing pages, campagnes).',
-    'version'     => '1.0.0',
+    'version'     => '1.0.1',
     'author'      => 'Witty',
 
     'routes' => [
@@ -34,13 +34,6 @@ return [
         ],
     ],
 
-    // Ces parametres apparaissent dans Parametres > Configuration > Witty
-    // et sont persistes dans app/config/local.php
-    'parameters' => [
-        'witty_provider'             => 'anthropic',
-        'witty_model'                => '',
-        'witty_api_key'              => '',
-        'witty_max_iterations'       => 8,
-        'witty_require_confirmation' => true,
-    ],
+    // Pas de cle 'parameters' : toute la configuration (cle API comprise) se
+    // saisit dans la fiche du plugin, cf. Integration/Support/ConfigSupport.php.
 ];
