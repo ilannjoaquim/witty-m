@@ -7,11 +7,13 @@ namespace MauticPlugin\WittyBundle\Service\Llm;
 use MauticPlugin\WittyBundle\Service\Llm\Dto\LlmResult;
 use MauticPlugin\WittyBundle\Service\Llm\Dto\Message;
 use MauticPlugin\WittyBundle\Service\Llm\Dto\ToolCall;
+use MauticPlugin\WittyBundle\Service\Llm\Dto\Usage;
 use MauticPlugin\WittyBundle\Service\WittyConfig;
 
 class GeminiProvider extends AbstractHttpProvider
 {
-    private const ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent';
+    private const ENDPOINT        = 'https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent';
+    private const ENDPOINT_STREAM = 'https://generativelanguage.googleapis.com/v1beta/models/%s:streamGenerateContent?alt=sse';
 
     public function getKey(): string
     {
@@ -19,6 +21,91 @@ class GeminiProvider extends AbstractHttpProvider
     }
 
     public function chat(array $messages, array $tools, string $systemPrompt, string $model, string $apiKey): LlmResult
+    {
+        $data = $this->post(
+            sprintf(self::ENDPOINT, $model),
+            $this->payload($messages, $tools, $systemPrompt),
+            ['x-goog-api-key' => $apiKey],
+        );
+
+        $text      = '';
+        $toolCalls = [];
+        $index     = 0;
+
+        foreach ($data['candidates'][0]['content']['parts'] ?? [] as $part) {
+            if (isset($part['text'])) {
+                $text .= $part['text'];
+            }
+
+            if (isset($part['functionCall'])) {
+                $toolCalls[] = $this->toolCallFromPart($part['functionCall'], $index++);
+            }
+        }
+
+        return new LlmResult(
+            '' !== $text ? $text : null,
+            $toolCalls,
+            Usage::fromRaw((array) ($data['usageMetadata'] ?? [])),
+        );
+    }
+
+    /**
+     * Gemini renvoie une suite de reponses completes : chaque evenement contient
+     * des `parts` a concatener, et le dernier porte l'usage cumule.
+     */
+    public function stream(array $messages, array $tools, string $systemPrompt, string $model, string $apiKey, callable $onText): LlmResult
+    {
+        $text      = '';
+        $toolCalls = [];
+        $index     = 0;
+        $usage     = [];
+
+        $this->streamPost(
+            sprintf(self::ENDPOINT_STREAM, $model),
+            $this->payload($messages, $tools, $systemPrompt),
+            ['x-goog-api-key' => $apiKey],
+            function (array $event) use (&$text, &$toolCalls, &$index, &$usage, $onText): void {
+                if (isset($event['usageMetadata']) && is_array($event['usageMetadata'])) {
+                    $usage = $event['usageMetadata'];
+                }
+
+                foreach ($event['candidates'][0]['content']['parts'] ?? [] as $part) {
+                    if (isset($part['text']) && '' !== $part['text']) {
+                        $text .= $part['text'];
+                        $onText((string) $part['text']);
+                    }
+
+                    if (isset($part['functionCall'])) {
+                        $toolCalls[] = $this->toolCallFromPart($part['functionCall'], $index++);
+                    }
+                }
+            },
+        );
+
+        return new LlmResult('' !== $text ? $text : null, $toolCalls, Usage::fromRaw($usage));
+    }
+
+    /**
+     * @param array<string, mixed> $functionCall
+     */
+    private function toolCallFromPart(array $functionCall, int $index): ToolCall
+    {
+        // Gemini ne fournit pas d'identifiant d'appel : on en genere un
+        // deterministe pour pouvoir apparier la reponse.
+        return new ToolCall(
+            sprintf('gemini_%d_%s', $index, (string) ($functionCall['name'] ?? '')),
+            (string) ($functionCall['name'] ?? ''),
+            (array) ($functionCall['args'] ?? []),
+        );
+    }
+
+    /**
+     * @param Message[]                                                                  $messages
+     * @param array<int, array{name: string, description: string, schema: array<mixed>}> $tools
+     *
+     * @return array<string, mixed>
+     */
+    private function payload(array $messages, array $tools, string $systemPrompt): array
     {
         $payload = [
             'systemInstruction' => ['parts' => [['text' => $systemPrompt]]],
@@ -36,35 +123,7 @@ class GeminiProvider extends AbstractHttpProvider
             ]];
         }
 
-        $data = $this->post(sprintf(self::ENDPOINT, $model), $payload, [
-            'x-goog-api-key' => $apiKey,
-        ]);
-
-        $text      = '';
-        $toolCalls = [];
-        $index     = 0;
-
-        foreach ($data['candidates'][0]['content']['parts'] ?? [] as $part) {
-            if (isset($part['text'])) {
-                $text .= $part['text'];
-            }
-
-            if (isset($part['functionCall'])) {
-                // Gemini ne fournit pas d'identifiant d'appel : on en genere un
-                // deterministe pour pouvoir apparier la reponse.
-                $toolCalls[] = new ToolCall(
-                    sprintf('gemini_%d_%s', $index++, $part['functionCall']['name']),
-                    (string) $part['functionCall']['name'],
-                    (array) ($part['functionCall']['args'] ?? []),
-                );
-            }
-        }
-
-        return new LlmResult(
-            '' !== $text ? $text : null,
-            $toolCalls,
-            (array) ($data['usageMetadata'] ?? []),
-        );
+        return $payload;
     }
 
     /**

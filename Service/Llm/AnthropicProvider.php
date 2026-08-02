@@ -7,6 +7,7 @@ namespace MauticPlugin\WittyBundle\Service\Llm;
 use MauticPlugin\WittyBundle\Service\Llm\Dto\LlmResult;
 use MauticPlugin\WittyBundle\Service\Llm\Dto\Message;
 use MauticPlugin\WittyBundle\Service\Llm\Dto\ToolCall;
+use MauticPlugin\WittyBundle\Service\Llm\Dto\Usage;
 use MauticPlugin\WittyBundle\Service\WittyConfig;
 
 class AnthropicProvider extends AbstractHttpProvider
@@ -21,25 +22,7 @@ class AnthropicProvider extends AbstractHttpProvider
 
     public function chat(array $messages, array $tools, string $systemPrompt, string $model, string $apiKey): LlmResult
     {
-        $payload = [
-            'model'      => $model,
-            'max_tokens' => 4096,
-            'system'     => $systemPrompt,
-            'messages'   => $this->formatMessages($messages),
-        ];
-
-        if ([] !== $tools) {
-            $payload['tools'] = array_map(fn (array $tool): array => [
-                'name'         => $tool['name'],
-                'description'  => $tool['description'],
-                'input_schema' => $this->sanitizeSchema($tool['schema']),
-            ], $tools);
-        }
-
-        $data = $this->post(self::ENDPOINT, $payload, [
-            'x-api-key'         => $apiKey,
-            'anthropic-version' => self::VERSION,
-        ]);
+        $data = $this->post(self::ENDPOINT, $this->payload($messages, $tools, $systemPrompt, $model), $this->headers($apiKey));
 
         $text      = '';
         $toolCalls = [];
@@ -56,7 +39,107 @@ class AnthropicProvider extends AbstractHttpProvider
             }
         }
 
-        return new LlmResult('' !== $text ? $text : null, $toolCalls, (array) ($data['usage'] ?? []));
+        return new LlmResult('' !== $text ? $text : null, $toolCalls, Usage::fromRaw((array) ($data['usage'] ?? [])));
+    }
+
+    /**
+     * Le flux Anthropic est une suite de blocs indexes : le texte arrive en
+     * `text_delta`, les arguments d'outil en `input_json_delta` (JSON partiel a
+     * concatener avant decodage).
+     */
+    public function stream(array $messages, array $tools, string $systemPrompt, string $model, string $apiKey, callable $onText): LlmResult
+    {
+        $payload           = $this->payload($messages, $tools, $systemPrompt, $model);
+        $payload['stream'] = true;
+
+        $text   = '';
+        $blocks = [];
+        $usage  = ['input_tokens' => 0, 'output_tokens' => 0];
+
+        $this->streamPost(self::ENDPOINT, $payload, $this->headers($apiKey), function (array $event) use (&$text, &$blocks, &$usage, $onText): void {
+            $index = (int) ($event['index'] ?? 0);
+
+            switch ($event['type'] ?? '') {
+                case 'message_start':
+                    $usage['input_tokens'] = (int) ($event['message']['usage']['input_tokens'] ?? 0);
+                    break;
+
+                case 'content_block_start':
+                    $block = $event['content_block'] ?? [];
+
+                    if ('tool_use' === ($block['type'] ?? '')) {
+                        $blocks[$index] = [
+                            'id'   => (string) ($block['id'] ?? ''),
+                            'name' => (string) ($block['name'] ?? ''),
+                            'json' => '',
+                        ];
+                    }
+                    break;
+
+                case 'content_block_delta':
+                    $delta = $event['delta'] ?? [];
+
+                    if ('text_delta' === ($delta['type'] ?? '')) {
+                        $chunk = (string) ($delta['text'] ?? '');
+                        $text .= $chunk;
+                        $onText($chunk);
+                    } elseif ('input_json_delta' === ($delta['type'] ?? '') && isset($blocks[$index])) {
+                        $blocks[$index]['json'] .= (string) ($delta['partial_json'] ?? '');
+                    }
+                    break;
+
+                case 'message_delta':
+                    $usage['output_tokens'] = (int) ($event['usage']['output_tokens'] ?? $usage['output_tokens']);
+                    break;
+            }
+        });
+
+        $toolCalls = [];
+
+        foreach ($blocks as $block) {
+            $arguments = json_decode('' !== $block['json'] ? $block['json'] : '{}', true);
+
+            $toolCalls[] = new ToolCall($block['id'], $block['name'], is_array($arguments) ? $arguments : []);
+        }
+
+        return new LlmResult('' !== $text ? $text : null, $toolCalls, Usage::fromRaw($usage));
+    }
+
+    /**
+     * @param Message[]                                                                  $messages
+     * @param array<int, array{name: string, description: string, schema: array<mixed>}> $tools
+     *
+     * @return array<string, mixed>
+     */
+    private function payload(array $messages, array $tools, string $systemPrompt, string $model): array
+    {
+        $payload = [
+            'model'      => $model,
+            'max_tokens' => 4096,
+            'system'     => $systemPrompt,
+            'messages'   => $this->formatMessages($messages),
+        ];
+
+        if ([] !== $tools) {
+            $payload['tools'] = array_map(fn (array $tool): array => [
+                'name'         => $tool['name'],
+                'description'  => $tool['description'],
+                'input_schema' => $this->sanitizeSchema($tool['schema']),
+            ], $tools);
+        }
+
+        return $payload;
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function headers(string $apiKey): array
+    {
+        return [
+            'x-api-key'         => $apiKey,
+            'anthropic-version' => self::VERSION,
+        ];
     }
 
     /**

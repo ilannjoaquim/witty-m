@@ -41,6 +41,11 @@ class CreateSegmentTool extends AbstractTool
         return 'lead:lists:editother';
     }
 
+    public function getObjectType(): ?string
+    {
+        return 'segment';
+    }
+
     public function getSchema(): array
     {
         return $this->schema([

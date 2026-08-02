@@ -34,6 +34,8 @@ class FeatureSettingsType extends AbstractType
                 'model'                => '',
                 'max_iterations'       => WittyConfig::DEFAULT_MAX_ITERATIONS,
                 'require_confirmation' => true,
+                'streaming'            => true,
+                'daily_token_quota'    => 0,
             ]);
         });
 
@@ -76,6 +78,22 @@ class FeatureSettingsType extends AbstractType
         $builder->add('require_confirmation', YesNoButtonGroupType::class, [
             'label' => 'mautic.witty.config.require_confirmation',
             'attr'  => ['tooltip' => 'mautic.witty.config.require_confirmation.tooltip'],
+        ]);
+
+        $builder->add('streaming', YesNoButtonGroupType::class, [
+            'label' => 'mautic.witty.config.streaming',
+            'attr'  => ['tooltip' => 'mautic.witty.config.streaming.tooltip'],
+        ]);
+
+        $builder->add('daily_token_quota', IntegerType::class, [
+            'label'      => 'mautic.witty.config.daily_token_quota',
+            'required'   => false,
+            'attr'       => [
+                'class'   => 'form-control',
+                'min'     => 0,
+                'tooltip' => 'mautic.witty.config.daily_token_quota.tooltip',
+            ],
+            'label_attr' => ['class' => 'control-label'],
         ]);
     }
 }

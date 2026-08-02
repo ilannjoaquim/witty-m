@@ -1,0 +1,63 @@
+{% extends '@MauticCore/Default/content.html.twig' %}
+
+{% block headerTitle %}{{ 'mautic.witty.audit.header'|trans }}{% endblock %}
+
+{% block content %}
+<div class="panel panel-default">
+    <div class="panel-body">
+        {% if not isAdmin %}
+            <div class="alert alert-info">{{ 'mautic.witty.audit.own_only'|trans }}</div>
+        {% endif %}
+
+        {% if writes|length %}
+            <p class="text-muted small">
+                {{ 'mautic.witty.audit.writes_30d'|trans }} :
+                {% for row in writes %}
+                    <span class="label label-default">{{ row.tool }} &times; {{ row.total }}</span>
+                {% endfor %}
+            </p>
+        {% endif %}
+
+        <table class="table table-hover table-striped table-bordered">
+            <thead>
+                <tr>
+                    <th>{{ 'mautic.witty.audit.date'|trans }}</th>
+                    <th>{{ 'mautic.witty.audit.user'|trans }}</th>
+                    <th>{{ 'mautic.witty.audit.tool'|trans }}</th>
+                    <th>{{ 'mautic.witty.audit.status'|trans }}</th>
+                    <th>{{ 'mautic.witty.audit.object'|trans }}</th>
+                    <th>{{ 'mautic.witty.audit.arguments'|trans }}</th>
+                    <th class="text-right">ms</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for entry in entries %}
+                <tr>
+                    <td class="text-nowrap">{{ entry.dateAdded|date('d/m/Y H:i:s') }}</td>
+                    <td>{{ entry.userName }}</td>
+                    <td>
+                        <a href="{{ path('witty_audit', {'tool': entry.tool}) }}">{{ entry.tool }}</a>
+                        {% if entry.writeOperation %}<i class="ri-pencil-line text-warning" title="{{ 'mautic.witty.audit.write'|trans }}"></i>{% endif %}
+                    </td>
+                    <td>
+                        {% if entry.status == 'ok' %}
+                            <span class="label label-success">ok</span>
+                        {% elseif entry.status == 'confirmation_required' %}
+                            <span class="label label-warning">{{ 'mautic.witty.audit.pending'|trans }}</span>
+                        {% else %}
+                            <span class="label label-danger">{{ entry.status }}</span>
+                        {% endif %}
+                        {% if entry.message %}<div class="text-muted small">{{ entry.message|slice(0, 160) }}</div>{% endif %}
+                    </td>
+                    <td>{% if entry.objectId %}{{ entry.objectType }} #{{ entry.objectId }}{% endif %}</td>
+                    <td><code class="small">{{ entry.arguments|json_encode|slice(0, 200) }}</code></td>
+                    <td class="text-right">{{ entry.durationMs }}</td>
+                </tr>
+            {% else %}
+                <tr><td colspan="7" class="text-muted">{{ 'mautic.witty.audit.empty'|trans }}</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

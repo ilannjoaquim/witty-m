@@ -28,6 +28,11 @@ return function (ContainerConfigurator $configurator): void {
     $services->load('MauticPlugin\\WittyBundle\\', '../')
         ->exclude('../{'.implode(',', array_merge(MauticCoreExtension::DEFAULT_EXCLUDES, $excludes)).'}');
 
+    // Entity/ est exclu du chargement ci-dessus ; les repositories doivent tout
+    // de meme etre des services, sinon Doctrine ne sait pas les instancier
+    // (ils heritent de ServiceEntityRepository).
+    $services->load('MauticPlugin\\WittyBundle\\Entity\\', '../Entity/*Repository.php');
+
     $services->get(ToolRegistry::class)->arg('$tools', tagged_iterator('witty.tool'));
 
     // Cle de service imposee par IntegrationHelper : mautic.integration.<nom en

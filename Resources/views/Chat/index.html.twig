@@ -4,38 +4,81 @@
 
 {% block content %}
 <style>
-    #witty-app { display: flex; flex-direction: column; height: calc(100vh - 200px); min-height: 420px; }
+    #witty-app { display: flex; gap: 16px; height: calc(100vh - 200px); min-height: 460px; }
+    #witty-sidebar { width: 240px; flex: 0 0 240px; display: flex; flex-direction: column; }
+    #witty-conversations { flex: 1; overflow-y: auto; border: 1px solid #e0e0e0; border-radius: 4px; background: #fff; }
+    .witty-conv { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-bottom: 1px solid #f0f0f0; cursor: pointer; font-size: 13px; }
+    .witty-conv:hover { background: #f6f8fb; }
+    .witty-conv.active { background: #eef1f6; font-weight: 600; }
+    .witty-conv-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .witty-conv-del { color: #a5261c; opacity: .45; }
+    .witty-conv-del:hover { opacity: 1; }
+    #witty-main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
     #witty-log { flex: 1; overflow-y: auto; padding: 16px; background: #fff; border: 1px solid #e0e0e0; border-radius: 4px; }
     .witty-msg { max-width: 78%; margin-bottom: 14px; padding: 10px 14px; border-radius: 10px; line-height: 1.5; white-space: pre-wrap; word-wrap: break-word; }
     .witty-msg.user { margin-left: auto; background: #4e5e9e; color: #fff; }
-    .witty-msg.bot { background: #f2f4f8; color: #2b2b2b; }
+    .witty-msg.assistant { background: #f2f4f8; color: #2b2b2b; }
     .witty-msg.error { background: #fdecea; color: #a5261c; border: 1px solid #f5c6c2; }
     .witty-trace { margin: 6px 0 14px; font-size: 12px; color: #6b7280; }
     .witty-chip { display: inline-block; margin: 2px 4px 2px 0; padding: 2px 8px; border-radius: 10px; background: #eef1f6; border: 1px solid #dfe3ea; }
-    .witty-chip.error { background: #fdecea; border-color: #f5c6c2; color: #a5261c; }
+    .witty-chip.running { background: #fff8e1; border-color: #f3e2a9; }
+    .witty-chip.error, .witty-chip.denied { background: #fdecea; border-color: #f5c6c2; color: #a5261c; }
     #witty-form { display: flex; gap: 8px; margin-top: 12px; }
     #witty-input { flex: 1; resize: none; }
+    #witty-meta { display: flex; justify-content: space-between; font-size: 12px; color: #6b7280; margin-bottom: 6px; }
+    .witty-cursor::after { content: '▍'; animation: witty-blink 1s step-start infinite; }
+    @keyframes witty-blink { 50% { opacity: 0; } }
 </style>
 
 <div id="witty-app"
-     data-endpoint="{{ path('witty_chat_send') }}"
+     data-stream-endpoint="{{ path('witty_chat_stream') }}"
+     data-send-endpoint="{{ path('witty_chat_send') }}"
+     data-list-endpoint="{{ path('witty_conversations') }}"
+     data-conversation-endpoint="{{ path('witty_conversation', {'id': 0}) }}"
+     data-delete-endpoint="{{ path('witty_conversation_delete', {'id': 0}) }}"
+     data-streaming="{{ streaming ? '1' : '0' }}"
      data-configured="{{ isConfigured ? '1' : '0' }}">
 
-    {% if not isConfigured %}
-        <div class="alert alert-warning">{{ 'mautic.witty.chat.not_configured'|trans }}</div>
-    {% else %}
-        <p class="text-muted small">{{ provider }} &middot; {{ model }}</p>
-    {% endif %}
-
-    <div id="witty-log"></div>
-
-    <div id="witty-form">
-        <textarea id="witty-input" class="form-control" rows="2"
-                  placeholder="{{ 'mautic.witty.chat.placeholder'|trans }}"
-                  {{ isConfigured ? '' : 'disabled' }}></textarea>
-        <button id="witty-send" class="btn btn-primary" {{ isConfigured ? '' : 'disabled' }}>
-            {{ 'mautic.witty.chat.send'|trans }}
+    <div id="witty-sidebar">
+        <button id="witty-new" class="btn btn-default btn-sm mb-10" {{ isConfigured ? '' : 'disabled' }}>
+            {{ 'mautic.witty.chat.new'|trans }}
         </button>
+        <div id="witty-conversations">
+            {% for conversation in conversations %}
+                <div class="witty-conv" data-id="{{ conversation.id }}">
+                    <span class="witty-conv-title" title="{{ conversation.title }}">{{ conversation.title }}</span>
+                    <i class="ri-delete-bin-line witty-conv-del" data-delete="{{ conversation.id }}"></i>
+                </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <div id="witty-main">
+        {% if not isConfigured %}
+            <div class="alert alert-warning">{{ 'mautic.witty.chat.not_configured'|trans }}</div>
+        {% else %}
+            <div id="witty-meta">
+                <span>{{ provider }} &middot; {{ model }}{% if not streaming %} &middot; {{ 'mautic.witty.chat.streaming_off'|trans }}{% endif %}</span>
+                <span id="witty-usage" data-quota="{{ usage.quota }}" data-used="{{ usage.used }}">
+                    {%- if usage.quota > 0 -%}
+                        {{ usage.used }} / {{ usage.quota }} tokens
+                    {%- else -%}
+                        {{ usage.used }} tokens
+                    {%- endif -%}
+                </span>
+            </div>
+        {% endif %}
+
+        <div id="witty-log"></div>
+
+        <div id="witty-form">
+            <textarea id="witty-input" class="form-control" rows="2"
+                      placeholder="{{ 'mautic.witty.chat.placeholder'|trans }}"
+                      {{ isConfigured ? '' : 'disabled' }}></textarea>
+            <button id="witty-send" class="btn btn-primary" {{ isConfigured ? '' : 'disabled' }}>
+                {{ 'mautic.witty.chat.send'|trans }}
+            </button>
+        </div>
     </div>
 </div>
 
@@ -45,15 +88,26 @@
     if (!app || app.dataset.wittyReady === '1') { return; }
     app.dataset.wittyReady = '1';
 
-    var endpoint = app.dataset.endpoint;
-    var log      = document.getElementById('witty-log');
-    var input    = document.getElementById('witty-input');
-    var send     = document.getElementById('witty-send');
+    var log       = document.getElementById('witty-log');
+    var input     = document.getElementById('witty-input');
+    var send      = document.getElementById('witty-send');
+    var list      = document.getElementById('witty-conversations');
+    var usageEl   = document.getElementById('witty-usage');
+    var streaming = app.dataset.streaming === '1';
 
-    // Le transcript vit cote client : l'API des trois fournisseurs est sans etat,
-    // on renvoie donc l'historique complet a chaque tour.
-    var history = [];
-    var busy    = false;
+    // Le transcript vit desormais en base : le navigateur ne garde que
+    // l'identifiant du fil courant.
+    var conversationId = null;
+    var busy           = false;
+
+    function headers() {
+        return {
+            'Content-Type': 'application/json',
+            'X-Requested-With': 'XMLHttpRequest',
+            // Mautic rejette tout POST ajax vers /s/ sans ce jeton.
+            'X-CSRF-Token': window.mauticAjaxCsrf || ''
+        };
+    }
 
     function bubble(text, kind) {
         var el = document.createElement('div');
@@ -64,18 +118,157 @@
         return el;
     }
 
-    function renderTrace(trace) {
-        if (!trace || !trace.length) { return; }
+    function chip(entry) {
+        var el = document.createElement('span');
+        el.className = 'witty-chip ' + (entry.state === 'running' ? 'running' : (entry.status || ''));
+        el.textContent = entry.label || entry.tool;
+        el.dataset.tool = entry.tool;
+        return el;
+    }
+
+    function traceContainer() {
         var wrap = document.createElement('div');
         wrap.className = 'witty-trace';
-        trace.forEach(function (item) {
-            var chip = document.createElement('span');
-            chip.className = 'witty-chip' + (item.status === 'error' ? ' error' : '');
-            chip.textContent = item.label;
-            wrap.appendChild(chip);
-        });
         log.appendChild(wrap);
-        log.scrollTop = log.scrollHeight;
+        return wrap;
+    }
+
+    function setUsage(usage) {
+        if (!usageEl || !usage) { return; }
+        var quota = parseInt(usageEl.dataset.quota || '0', 10);
+        var used  = parseInt(usageEl.dataset.used || '0', 10) + (usage.total || 0);
+        usageEl.dataset.used = used;
+        usageEl.textContent  = quota > 0 ? (used + ' / ' + quota + ' tokens') : (used + ' tokens');
+    }
+
+    function markActive(id) {
+        conversationId = id || null;
+        Array.prototype.forEach.call(list.querySelectorAll('.witty-conv'), function (el) {
+            el.classList.toggle('active', String(el.dataset.id) === String(id));
+        });
+    }
+
+    function refreshConversations(activeId) {
+        return fetch(app.dataset.listEndpoint, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                list.innerHTML = '';
+                (data.conversations || []).forEach(function (conversation) {
+                    var row = document.createElement('div');
+                    row.className = 'witty-conv';
+                    row.dataset.id = conversation.id;
+
+                    var title = document.createElement('span');
+                    title.className = 'witty-conv-title';
+                    title.title = conversation.title;
+                    title.textContent = conversation.title;
+
+                    var del = document.createElement('i');
+                    del.className = 'ri-delete-bin-line witty-conv-del';
+                    del.dataset.delete = conversation.id;
+
+                    row.appendChild(title);
+                    row.appendChild(del);
+                    list.appendChild(row);
+                });
+                markActive(activeId || conversationId);
+            });
+    }
+
+    function openConversation(id) {
+        var url = app.dataset.conversationEndpoint.replace(/0$/, id);
+
+        return fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                log.innerHTML = '';
+                (data.transcript || []).forEach(function (message) {
+                    bubble(message.text, message.role === 'user' ? 'user' : 'assistant');
+                    if (message.tools && message.tools.length) {
+                        var wrap = traceContainer();
+                        message.tools.forEach(function (tool) {
+                            wrap.appendChild(chip({ tool: tool, label: tool }));
+                        });
+                    }
+                });
+                markActive(id);
+            });
+    }
+
+    function deleteConversation(id) {
+        var url = app.dataset.deleteEndpoint.replace(/0\/delete$/, id + '/delete');
+
+        return fetch(url, { method: 'POST', headers: headers() })
+            .then(function () {
+                if (String(conversationId) === String(id)) {
+                    conversationId = null;
+                    log.innerHTML = '';
+                }
+                return refreshConversations();
+            });
+    }
+
+    list.addEventListener('click', function (event) {
+        var del = event.target.closest('[data-delete]');
+        if (del) {
+            event.stopPropagation();
+            deleteConversation(del.dataset.delete);
+            return;
+        }
+
+        var row = event.target.closest('.witty-conv');
+        if (row) { openConversation(row.dataset.id); }
+    });
+
+    document.getElementById('witty-new').addEventListener('click', function () {
+        log.innerHTML = '';
+        markActive(null);
+        input.focus();
+    });
+
+    function finish() {
+        busy = false;
+        send.disabled = false;
+        input.focus();
+    }
+
+    /**
+     * Decoupe le flux SSE en evenements. Une trame peut arriver en plusieurs
+     * morceaux et plusieurs trames dans le meme morceau : on accumule.
+     */
+    function consumeStream(response, handle) {
+        var reader  = response.body.getReader();
+        var decoder = new TextDecoder();
+        var buffer  = '';
+
+        function pump() {
+            return reader.read().then(function (result) {
+                if (result.done) { return; }
+
+                buffer += decoder.decode(result.value, { stream: true });
+
+                var frames = buffer.split('\n\n');
+                buffer = frames.pop();
+
+                frames.forEach(function (frame) {
+                    var event = 'message';
+                    var data  = '';
+
+                    frame.split('\n').forEach(function (line) {
+                        if (line.indexOf('event: ') === 0) { event = line.slice(7).trim(); }
+                        if (line.indexOf('data: ') === 0) { data += line.slice(6); }
+                    });
+
+                    if (!data) { return; }
+
+                    try { handle(event, JSON.parse(data)); } catch (e) { /* trame illisible : on ignore */ }
+                });
+
+                return pump();
+            });
+        }
+
+        return pump();
     }
 
     function submit() {
@@ -86,37 +279,80 @@
         send.disabled = true;
         input.value = '';
         bubble(message, 'user');
-        var pending = bubble('...', 'bot');
 
-        fetch(endpoint, {
+        var pending = bubble('', 'assistant');
+        pending.classList.add('witty-cursor');
+        var trace = null;
+
+        var request = fetch(streaming ? app.dataset.streamEndpoint : app.dataset.sendEndpoint, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
-            body: JSON.stringify({ message: message, history: history })
-        })
-        .then(function (response) {
-            return response.json().then(function (data) {
-                return { ok: response.ok, data: data };
-            });
-        })
-        .then(function (result) {
-            pending.remove();
-            if (!result.ok) {
-                bubble(result.data.error || 'Erreur inconnue.', 'error');
-                return;
-            }
-            history = result.data.history || history;
-            renderTrace(result.data.trace);
-            bubble(result.data.reply, 'bot');
-        })
-        .catch(function (error) {
-            pending.remove();
-            bubble('Erreur reseau : ' + error.message, 'error');
-        })
-        .finally(function () {
-            busy = false;
-            send.disabled = false;
-            input.focus();
+            headers: headers(),
+            body: JSON.stringify({ message: message, conversation_id: conversationId })
         });
+
+        if (!streaming) {
+            request.then(function (response) {
+                return response.json().then(function (data) { return { ok: response.ok, data: data }; });
+            }).then(function (result) {
+                pending.classList.remove('witty-cursor');
+                if (!result.ok) {
+                    pending.remove();
+                    bubble(result.data.error || 'Erreur inconnue.', 'error');
+                    return;
+                }
+                pending.textContent = result.data.reply;
+                if (result.data.trace && result.data.trace.length) {
+                    var wrap = traceContainer();
+                    result.data.trace.forEach(function (entry) { wrap.appendChild(chip(entry)); });
+                }
+                setUsage(result.data.usage);
+                refreshConversations(result.data.conversation_id);
+            }).catch(function (error) {
+                pending.remove();
+                bubble('Erreur reseau : ' + error.message, 'error');
+            }).finally(finish);
+
+            return;
+        }
+
+        request.then(function (response) {
+            if (!response.ok || !response.body) {
+                return response.json().then(function (data) {
+                    throw new Error(data.error || ('HTTP ' + response.status));
+                });
+            }
+
+            return consumeStream(response, function (event, data) {
+                if (event === 'delta') {
+                    pending.textContent += data.text;
+                    log.scrollTop = log.scrollHeight;
+                } else if (event === 'tool') {
+                    trace = trace || traceContainer();
+                    var running = trace.querySelector('[data-tool="' + data.tool + '"].running');
+                    if (data.state === 'done' && running) {
+                        running.replaceWith(chip(data));
+                    } else if (data.state === 'running') {
+                        trace.appendChild(chip(data));
+                    }
+                    log.scrollTop = log.scrollHeight;
+                } else if (event === 'usage') {
+                    setUsage(data);
+                } else if (event === 'done') {
+                    pending.classList.remove('witty-cursor');
+                    if (data.reply && !pending.textContent) { pending.textContent = data.reply; }
+                    refreshConversations(data.conversation_id);
+                } else if (event === 'error') {
+                    pending.classList.remove('witty-cursor');
+                    if (!pending.textContent) { pending.remove(); }
+                    bubble(data.error || 'Erreur inconnue.', 'error');
+                    if (data.conversation_id) { refreshConversations(data.conversation_id); }
+                }
+            });
+        }).catch(function (error) {
+            pending.classList.remove('witty-cursor');
+            if (!pending.textContent) { pending.remove(); }
+            bubble('Erreur : ' + error.message, 'error');
+        }).finally(finish);
     }
 
     send.addEventListener('click', submit);

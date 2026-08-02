@@ -25,6 +25,12 @@ interface ToolInterface
     public function getRequiredPermission(): ?string;
 
     /**
+     * Type d'objet Mautic manipule ('email', 'segment', ...), pour le journal
+     * d'audit. null pour un outil de lecture qui ne cible pas un objet precis.
+     */
+    public function getObjectType(): ?string;
+
+    /**
      * @param array<string, mixed> $arguments
      *
      * @return array<string, mixed> resultat serialisable renvoye au modele

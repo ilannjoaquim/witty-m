@@ -42,6 +42,11 @@ class CreateEmailTool extends AbstractTool
         return 'email:emails:create';
     }
 
+    public function getObjectType(): ?string
+    {
+        return 'email';
+    }
+
     public function getSchema(): array
     {
         return $this->schema([

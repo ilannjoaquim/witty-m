@@ -19,4 +19,16 @@ interface LlmProviderInterface
      * @param array<int, array{name: string, description: string, schema: array<mixed>}>  $tools
      */
     public function chat(array $messages, array $tools, string $systemPrompt, string $model, string $apiKey): LlmResult;
+
+    /**
+     * Meme appel, en SSE : $onText recoit les fragments de texte au fil de l'eau.
+     * Le resultat complet (texte reconstitue, appels d'outils, usage) est tout de
+     * meme renvoye a la fin, pour que la boucle de l'agent n'ait pas a distinguer
+     * les deux modes.
+     *
+     * @param Message[]                                                                  $messages
+     * @param array<int, array{name: string, description: string, schema: array<mixed>}> $tools
+     * @param callable(string): void                                                     $onText
+     */
+    public function stream(array $messages, array $tools, string $systemPrompt, string $model, string $apiKey, callable $onText): LlmResult;
 }

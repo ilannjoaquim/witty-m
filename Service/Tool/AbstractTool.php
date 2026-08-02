@@ -16,6 +16,11 @@ abstract class AbstractTool implements ToolInterface
         return null;
     }
 
+    public function getObjectType(): ?string
+    {
+        return null;
+    }
+
     /**
      * @param array<string, mixed> $properties
      * @param array<int, string>   $required

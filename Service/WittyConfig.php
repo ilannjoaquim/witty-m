@@ -86,6 +86,24 @@ class WittyConfig
         return max(1, min(20, 0 === $max ? self::DEFAULT_MAX_ITERATIONS : $max));
     }
 
+    /**
+     * Plafond de tokens par utilisateur et par jour. 0 = pas de plafond.
+     */
+    public function getDailyTokenQuota(): int
+    {
+        return max(0, (int) ($this->getFeatureSettings()['daily_token_quota'] ?? 0));
+    }
+
+    /**
+     * Le streaming se desactive si l'hebergement bufferise les reponses
+     * (certains proxies et configurations PHP-FPM), auquel cas la reponse
+     * arriverait d'un bloc a la fin, en plus lent.
+     */
+    public function isStreamingEnabled(): bool
+    {
+        return (bool) ($this->getFeatureSettings()['streaming'] ?? true);
+    }
+
     public function requiresConfirmation(): bool
     {
         // Par defaut on confirme : une integration jamais enregistree ne doit pas

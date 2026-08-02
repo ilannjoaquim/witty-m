@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace MauticPlugin\WittyBundle\Service\Tool;
 
 use Mautic\CoreBundle\Security\Permissions\CorePermissions;
+use MauticPlugin\WittyBundle\Entity\WittyAuditLog;
+use MauticPlugin\WittyBundle\Entity\WittyConversation;
+use MauticPlugin\WittyBundle\Service\Audit\AuditLogger;
 use MauticPlugin\WittyBundle\Service\WittyConfig;
 use Psr\Log\LoggerInterface;
 
@@ -20,6 +23,7 @@ class ToolRegistry
         iterable $tools,
         private CorePermissions $security,
         private WittyConfig $config,
+        private AuditLogger $auditLogger,
         private LoggerInterface $logger,
     ) {
         foreach ($tools as $tool) {
@@ -58,7 +62,7 @@ class ToolRegistry
      *
      * @return array<string, mixed>
      */
-    public function execute(string $name, array $arguments): array
+    public function execute(string $name, array $arguments, ?WittyConversation $conversation = null): array
     {
         $tool = $this->tools[$name] ?? null;
 
@@ -66,8 +70,13 @@ class ToolRegistry
             return ['status' => 'error', 'error' => sprintf('Outil inconnu : %s', $name)];
         }
 
+        $startedAt = microtime(true);
+
         if (!$this->isAllowed($tool)) {
-            return ['status' => 'error', 'error' => "Permission refusee pour cette action."];
+            $output = ['status' => WittyAuditLog::STATUS_DENIED, 'error' => 'Permission refusee pour cette action.'];
+            $this->auditLogger->record($tool, $arguments, $output, $this->elapsed($startedAt), $conversation);
+
+            return $output;
         }
 
         if ($tool->isWriteOperation()
@@ -79,12 +88,21 @@ class ToolRegistry
         }
 
         try {
-            return $tool->execute($arguments);
+            $output = $tool->execute($arguments);
         } catch (\Throwable $e) {
             $this->logger->error('Witty tool failure', ['tool' => $name, 'exception' => $e]);
 
-            return ['status' => 'error', 'error' => $e->getMessage()];
+            $output = ['status' => 'error', 'error' => $e->getMessage()];
         }
+
+        $this->auditLogger->record($tool, $arguments, $output, $this->elapsed($startedAt), $conversation);
+
+        return $output;
+    }
+
+    private function elapsed(float $startedAt): int
+    {
+        return (int) round((microtime(true) - $startedAt) * 1000);
     }
 
     public function requiresConfirmation(string $name): bool

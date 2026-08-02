@@ -38,6 +38,11 @@ class CreateLandingPageTool extends AbstractTool
         return 'page:pages:create';
     }
 
+    public function getObjectType(): ?string
+    {
+        return 'page';
+    }
+
     public function getSchema(): array
     {
         return $this->schema([

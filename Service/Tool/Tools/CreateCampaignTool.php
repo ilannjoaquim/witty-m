@@ -50,6 +50,11 @@ class CreateCampaignTool extends AbstractTool
         return 'campaign:campaigns:create';
     }
 
+    public function getObjectType(): ?string
+    {
+        return 'campaign';
+    }
+
     public function getSchema(): array
     {
         return $this->schema([

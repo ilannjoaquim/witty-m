@@ -41,11 +41,93 @@ abstract class AbstractHttpProvider implements LlmProviderInterface
         }
 
         if ($status >= 400) {
-            $message = $decoded['error']['message'] ?? $decoded['error']['status'] ?? $body;
-            throw new LlmException(sprintf('Erreur fournisseur (HTTP %d) : %s', $status, (string) $message));
+            $this->throwFromErrorBody($status, $body);
         }
 
         return $decoded;
+    }
+
+    /**
+     * Consomme un flux SSE et passe chaque evenement decode a $onEvent.
+     *
+     * Le decoupage se fait sur les lignes et non sur les chunks HTTP : un chunk
+     * peut couper un evenement en plein milieu, et deux evenements peuvent
+     * arriver dans le meme chunk.
+     *
+     * @param array<string, mixed>              $payload
+     * @param array<string, string>             $headers
+     * @param callable(array<string, mixed>): void $onEvent
+     */
+    protected function streamPost(string $url, array $payload, array $headers, callable $onEvent): void
+    {
+        try {
+            $response = $this->httpClient->request('POST', $url, [
+                'headers' => $headers + ['Content-Type' => 'application/json', 'Accept' => 'text/event-stream'],
+                'json'    => $payload,
+                'timeout' => 300,
+                'buffer'  => false,
+            ]);
+
+            $status = $response->getStatusCode();
+
+            if ($status >= 400) {
+                $this->throwFromErrorBody($status, $response->getContent(false));
+            }
+
+            $buffer = '';
+
+            foreach ($this->httpClient->stream($response) as $chunk) {
+                if ($chunk->isTimeout()) {
+                    continue;
+                }
+
+                $buffer .= $chunk->getContent();
+
+                while (false !== ($position = strpos($buffer, "\n"))) {
+                    $line   = rtrim(substr($buffer, 0, $position), "\r");
+                    $buffer = substr($buffer, $position + 1);
+
+                    if (!str_starts_with($line, 'data:')) {
+                        // Lignes "event:", ":" (keep-alive) et lignes vides : sans interet,
+                        // le type d'evenement est deja dans la charge utile JSON.
+                        continue;
+                    }
+
+                    $data = trim(substr($line, 5));
+
+                    if ('' === $data || '[DONE]' === $data) {
+                        continue;
+                    }
+
+                    $decoded = json_decode($data, true);
+
+                    if (is_array($decoded)) {
+                        $onEvent($decoded);
+                    }
+                }
+
+                if ($chunk->isLast()) {
+                    break;
+                }
+            }
+        } catch (LlmException $e) {
+            throw $e;
+        } catch (\Throwable $e) {
+            throw new LlmException(sprintf('%s: flux interrompu (%s)', static::class, $e->getMessage()), 0, $e);
+        }
+    }
+
+    /**
+     * Les trois fournisseurs renvoient leurs erreurs sous {"error": {...}}.
+     */
+    protected function throwFromErrorBody(int $status, string $body): never
+    {
+        $decoded = json_decode($body, true);
+        $message = is_array($decoded)
+            ? ($decoded['error']['message'] ?? $decoded['error']['status'] ?? $body)
+            : $body;
+
+        throw new LlmException(sprintf('Erreur fournisseur (HTTP %d) : %s', $status, (string) $message));
     }
 
     /**
