@@ -4,13 +4,22 @@ declare(strict_types=1);
 
 namespace MauticPlugin\WittyBundle\Service\Tool;
 
+use Mautic\AssetBundle\Model\AssetModel;
 use Mautic\CampaignBundle\Model\CampaignModel;
+use Mautic\ChannelBundle\Model\MessageModel;
 use Mautic\CoreBundle\Model\AbstractCommonModel;
 use Mautic\CoreBundle\Security\Permissions\CorePermissions;
+use Mautic\DynamicContentBundle\Model\DynamicContentModel;
 use Mautic\EmailBundle\Model\EmailModel;
 use Mautic\FormBundle\Model\FormModel;
 use Mautic\LeadBundle\Model\ListModel;
 use Mautic\PageBundle\Model\PageModel;
+use Mautic\PointBundle\Model\PointGroupModel;
+use Mautic\PointBundle\Model\PointModel;
+use Mautic\PointBundle\Model\TriggerModel;
+use Mautic\ProjectBundle\Model\ProjectModel;
+use Mautic\ReportBundle\Model\ReportModel;
+use Mautic\StageBundle\Model\StageModel;
 
 /**
  * Table de correspondance type d'objet -> modele, permissions et URL.
@@ -22,7 +31,12 @@ use Mautic\PageBundle\Model\PageModel;
  */
 class EntityCatalog
 {
-    /** @var array<string, array{model: string, own: string, other: string, url: string}> */
+    /**
+     * 'flat' remplace 'own'/'other' pour les types sans notion de proprietaire
+     * (Project : permissions plates edit/delete/create, pas de editown/editother).
+     *
+     * @var array<string, array{model: string, own?: string, other?: string, flat?: string, url: string}>
+     */
     private const MAP = [
         'email' => [
             'model' => EmailModel::class,
@@ -54,6 +68,59 @@ class EntityCatalog
             'other' => 'form:forms:%sother',
             'url'   => '/s/forms/edit/%d',
         ],
+        'asset' => [
+            'model' => AssetModel::class,
+            'own'   => 'asset:assets:%sown',
+            'other' => 'asset:assets:%sother',
+            'url'   => '/s/assets/edit/%d',
+        ],
+        'dynamic_content' => [
+            'model' => DynamicContentModel::class,
+            'own'   => 'dynamiccontent:dynamiccontents:%sown',
+            'other' => 'dynamiccontent:dynamiccontents:%sother',
+            'url'   => '/s/dwc/edit/%d',
+        ],
+        'stage' => [
+            'model' => StageModel::class,
+            'own'   => 'stage:stages:%sown',
+            'other' => 'stage:stages:%sother',
+            'url'   => '/s/stages/edit/%d',
+        ],
+        'point' => [
+            'model' => PointModel::class,
+            'own'   => 'point:points:%sown',
+            'other' => 'point:points:%sother',
+            'url'   => '/s/points/edit/%d',
+        ],
+        'point_trigger' => [
+            'model' => TriggerModel::class,
+            'own'   => 'point:triggers:%sown',
+            'other' => 'point:triggers:%sother',
+            'url'   => '/s/points/triggers/edit/%d',
+        ],
+        'point_group' => [
+            'model' => PointGroupModel::class,
+            'own'   => 'point:groups:%sown',
+            'other' => 'point:groups:%sother',
+            'url'   => '/s/points/groups/edit/%d',
+        ],
+        'report' => [
+            'model' => ReportModel::class,
+            'own'   => 'report:reports:%sown',
+            'other' => 'report:reports:%sother',
+            'url'   => '/s/reports/edit/%d',
+        ],
+        'project' => [
+            'model' => ProjectModel::class,
+            'flat'  => 'project:project:%s',
+            'url'   => '/s/projects/edit/%d',
+        ],
+        'message' => [
+            'model' => MessageModel::class,
+            'own'   => 'channel:messages:%sown',
+            'other' => 'channel:messages:%sother',
+            'url'   => '/s/messages/edit/%d',
+        ],
     ];
 
     /** @var array<string, AbstractCommonModel<object>> */
@@ -65,14 +132,32 @@ class EntityCatalog
         ListModel $listModel,
         CampaignModel $campaignModel,
         FormModel $formModel,
+        AssetModel $assetModel,
+        DynamicContentModel $dynamicContentModel,
+        StageModel $stageModel,
+        PointModel $pointModel,
+        TriggerModel $triggerModel,
+        PointGroupModel $pointGroupModel,
+        ReportModel $reportModel,
+        ProjectModel $projectModel,
+        MessageModel $messageModel,
         private CorePermissions $security,
     ) {
         $this->models = [
-            EmailModel::class    => $emailModel,
-            PageModel::class     => $pageModel,
-            ListModel::class     => $listModel,
-            CampaignModel::class => $campaignModel,
-            FormModel::class     => $formModel,
+            EmailModel::class          => $emailModel,
+            PageModel::class           => $pageModel,
+            ListModel::class           => $listModel,
+            CampaignModel::class       => $campaignModel,
+            FormModel::class           => $formModel,
+            AssetModel::class          => $assetModel,
+            DynamicContentModel::class => $dynamicContentModel,
+            StageModel::class          => $stageModel,
+            PointModel::class          => $pointModel,
+            TriggerModel::class        => $triggerModel,
+            PointGroupModel::class     => $pointGroupModel,
+            ReportModel::class         => $reportModel,
+            ProjectModel::class        => $projectModel,
+            MessageModel::class        => $messageModel,
         ];
     }
 
@@ -110,6 +195,10 @@ class EntityCatalog
     {
         if (!isset(self::MAP[$type])) {
             return false;
+        }
+
+        if (isset(self::MAP[$type]['flat'])) {
+            return $this->security->isGranted(sprintf(self::MAP[$type]['flat'], $operation));
         }
 
         $owner = null !== $entity && method_exists($entity, 'getCreatedBy') ? $entity->getCreatedBy() : 0;

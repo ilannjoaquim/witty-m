@@ -1,6 +1,23 @@
 {% extends '@MauticCore/Default/content.html.twig' %}
 
+{% block mauticContent 'witty' %}
+
 {% block headerTitle %}{{ 'mautic.witty.chat.header'|trans }}{% endblock %}
+
+{% block actions %}
+    {% if isConfigured %}
+        {% include '@MauticCore/Helper/button.html.twig' with {
+            buttons: [
+                {
+                    label: 'mautic.witty.chat.new',
+                    icon: 'ri-add-line',
+                    variant: 'primary',
+                    attributes: { id: 'witty-new', type: 'button' }
+                }
+            ]
+        } %}
+    {% endif %}
+{% endblock %}
 
 {% block content %}
 <style>
@@ -11,13 +28,22 @@
     .witty-conv:hover { background: #f6f8fb; }
     .witty-conv.active { background: #eef1f6; font-weight: 600; }
     .witty-conv-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .witty-conv-del { color: #a5261c; opacity: .45; }
+    .witty-conv-del { color: var(--button-danger-primary, #da1e28); opacity: .45; }
     .witty-conv-del:hover { opacity: 1; }
+    #witty-search-wrap { position: relative; }
+    #witty-search-results { position: absolute; top: 100%; left: 0; right: 0; z-index: 20; background: #fff; border: 1px solid #dfe3ea; border-radius: 4px; max-height: 320px; overflow-y: auto; display: none; box-shadow: 0 4px 10px rgba(0,0,0,.08); }
+    #witty-search-results.open { display: block; }
+    .witty-search-hit { padding: 8px 10px; border-bottom: 1px solid #f0f0f0; cursor: pointer; font-size: 12px; }
+    .witty-search-hit:hover { background: #f6f8fb; }
+    .witty-search-hit .title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .witty-search-hit .snippet { color: #6b7280; margin-top: 2px; }
+    .witty-search-hit .snippet mark { background: #fff3b0; padding: 0 1px; }
+    .witty-search-empty { padding: 10px; font-size: 12px; color: #6b7280; }
     #witty-main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
     #witty-log { flex: 1; overflow-y: auto; padding: 16px; background: #fff; border: 1px solid #e0e0e0; border-radius: 4px; }
     .witty-msg { max-width: 78%; margin-bottom: 14px; padding: 10px 14px; border-radius: 10px; line-height: 1.5; white-space: pre-wrap; word-wrap: break-word; }
-    .witty-msg.user { margin-left: auto; background: #4e5e9e; color: #fff; }
-    .witty-msg.assistant { background: #f2f4f8; color: #2b2b2b; }
+    .witty-msg.user { margin-left: auto; background: var(--button-secondary, #393939); color: var(--button-secondary-text, #fff); }
+    .witty-msg.assistant { background: var(--background-hover, #f2f4f8); color: var(--text-primary, #2b2b2b); }
     .witty-msg.error { background: #fdecea; color: #a5261c; border: 1px solid #f5c6c2; }
     .witty-trace { margin: 6px 0 14px; font-size: 12px; color: #6b7280; }
     .witty-chip { display: inline-block; margin: 2px 4px 2px 0; padding: 2px 8px; border-radius: 10px; background: #eef1f6; border: 1px solid #dfe3ea; }
@@ -25,7 +51,10 @@
     .witty-chip.error, .witty-chip.denied { background: #fdecea; border-color: #f5c6c2; color: #a5261c; }
     #witty-form { display: flex; gap: 8px; margin-top: 12px; }
     #witty-input { flex: 1; resize: none; }
-    #witty-meta { display: flex; justify-content: space-between; font-size: 12px; color: #6b7280; margin-bottom: 6px; }
+    #witty-meta { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 12px; color: #6b7280; margin-bottom: 6px; flex-wrap: wrap; }
+    #witty-model-select { display: flex; align-items: center; gap: 6px; }
+    #witty-model-select select.form-control { width: auto; height: auto; padding: 4px 8px; font-size: 12px; }
+    #witty-model { min-width: 190px; }
     .witty-cursor::after { content: '▍'; animation: witty-blink 1s step-start infinite; }
     @keyframes witty-blink { 50% { opacity: 0; } }
 </style>
@@ -36,13 +65,21 @@
      data-list-endpoint="{{ path('witty_conversations') }}"
      data-conversation-endpoint="{{ path('witty_conversation', {'id': 0}) }}"
      data-delete-endpoint="{{ path('witty_conversation_delete', {'id': 0}) }}"
+     data-search-endpoint="{{ path('witty_search') }}"
+     data-models-endpoint="{{ path('witty_models', {'provider': '__provider__'}) }}"
      data-streaming="{{ streaming ? '1' : '0' }}"
-     data-configured="{{ isConfigured ? '1' : '0' }}">
+     data-configured="{{ isConfigured ? '1' : '0' }}"
+     data-default-provider="{{ defaultProvider }}"
+     data-providers="{{ providers|json_encode }}">
 
     <div id="witty-sidebar">
-        <button id="witty-new" class="btn btn-default btn-sm mb-10" {{ isConfigured ? '' : 'disabled' }}>
-            {{ 'mautic.witty.chat.new'|trans }}
-        </button>
+        <div id="witty-search-wrap" class="mb-10">
+            <div class="input-group d-flex">
+                <span class="input-group-addon"><i class="ri-search-line" aria-hidden="true"></i></span>
+                <input type="search" id="witty-search" class="form-control search" placeholder="{{ 'mautic.witty.chat.search'|trans }}" autocomplete="false" {{ isConfigured ? '' : 'disabled' }}>
+            </div>
+            <div id="witty-search-results"></div>
+        </div>
         <div id="witty-conversations">
             {% for conversation in conversations %}
                 <div class="witty-conv" data-id="{{ conversation.id }}">
@@ -58,7 +95,18 @@
             <div class="alert alert-warning">{{ 'mautic.witty.chat.not_configured'|trans }}</div>
         {% else %}
             <div id="witty-meta">
-                <span>{{ provider }} &middot; {{ model }}{% if not streaming %} &middot; {{ 'mautic.witty.chat.streaming_off'|trans }}{% endif %}</span>
+                <div id="witty-model-select">
+                    <!-- class="not-chosen" : sans ca, Mautic remplace ce <select> par un widget
+                         Chosen fige au chargement (app/bundles/CoreBundle/Assets/js/1a.content.js),
+                         qui ne reflete jamais les options ajoutees dynamiquement en JS ensuite. -->
+                    <select id="witty-provider" class="not-chosen form-control input-sm" title="{{ 'mautic.witty.chat.provider'|trans }}">
+                        {% for provider in providers %}
+                            <option value="{{ provider.key }}">{{ provider.label }}</option>
+                        {% endfor %}
+                    </select>
+                    <select id="witty-model" class="not-chosen form-control input-sm" title="{{ 'mautic.witty.chat.model'|trans }}"></select>
+                    {% if not streaming %}<span>&middot; {{ 'mautic.witty.chat.streaming_off'|trans }}</span>{% endif %}
+                </div>
                 <span id="witty-usage" data-quota="{{ usage.quota }}" data-used="{{ usage.used }}">
                     {%- if usage.quota > 0 -%}
                         {{ usage.used }} / {{ usage.quota }} tokens
@@ -88,17 +136,129 @@
     if (!app || app.dataset.wittyReady === '1') { return; }
     app.dataset.wittyReady = '1';
 
-    var log       = document.getElementById('witty-log');
-    var input     = document.getElementById('witty-input');
-    var send      = document.getElementById('witty-send');
-    var list      = document.getElementById('witty-conversations');
-    var usageEl   = document.getElementById('witty-usage');
-    var streaming = app.dataset.streaming === '1';
+    var log            = document.getElementById('witty-log');
+    var input          = document.getElementById('witty-input');
+    var send           = document.getElementById('witty-send');
+    var list           = document.getElementById('witty-conversations');
+    var usageEl        = document.getElementById('witty-usage');
+    var providerSelect = document.getElementById('witty-provider');
+    var modelSelect     = document.getElementById('witty-model');
+    var streaming      = app.dataset.streaming === '1';
+
+    // Fournisseurs pour lesquels une cle API est renseignee, envoyes par le
+    // serveur ; vide si aucune n'est configuree (formulaire alors masque).
+    var providers = [];
+    try { providers = JSON.parse(app.dataset.providers || '[]'); } catch (e) { providers = []; }
+
+    var STORAGE_PROVIDER = 'witty.provider';
+    var STORAGE_MODEL    = 'witty.model';
 
     // Le transcript vit desormais en base : le navigateur ne garde que
     // l'identifiant du fil courant.
     var conversationId = null;
     var busy           = false;
+
+    function providerByKey(key) {
+        for (var i = 0; i < providers.length; i++) {
+            if (providers[i].key === key) { return providers[i]; }
+        }
+        return null;
+    }
+
+    function populateModels(models, selectedValue) {
+        modelSelect.innerHTML = '';
+
+        models.forEach(function (model) {
+            var opt = document.createElement('option');
+            opt.value = model.id;
+            opt.textContent = model.label || model.id;
+            modelSelect.appendChild(opt);
+        });
+
+        if (selectedValue && models.some(function (model) { return model.id === selectedValue; })) {
+            modelSelect.value = selectedValue;
+        }
+    }
+
+    // Catalogue recupere en direct depuis l'API du fournisseur (cf. ModelCatalog
+    // cote serveur, qui met en cache et replie sur le modele configure si
+    // l'appel echoue) : le menu n'est donc jamais vide, meme hors ligne.
+    //
+    // Tout est protege par un try/catch synchrone + un timeout cote client :
+    // sans ca, la moindre exception avant l'attache du fetch (ou une requete
+    // qui ne repond jamais) laisse le select desactive indefiniment, sans
+    // aucun moyen de s'en sortir.
+    function loadModels(providerKey, modelOverride) {
+        var provider = providerByKey(providerKey);
+        if (!provider) { return Promise.resolve(); }
+
+        function releaseWithFallback() {
+            populateModels([{ id: provider.model, label: provider.model }], provider.model);
+            modelSelect.disabled = false;
+        }
+
+        modelSelect.disabled = true;
+
+        var url;
+        try {
+            populateModels([{ id: provider.model, label: '…' }], provider.model);
+            url = app.dataset.modelsEndpoint.replace('__provider__', providerKey);
+        } catch (e) {
+            releaseWithFallback();
+            return Promise.resolve();
+        }
+
+        var controller = ('AbortController' in window) ? new AbortController() : null;
+        var timeout = setTimeout(function () { if (controller) { controller.abort(); } }, 15000);
+
+        return fetch(url, {
+            headers: { 'X-Requested-With': 'XMLHttpRequest' },
+            signal: controller ? controller.signal : undefined
+        })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                var models = (data.models && data.models.length) ? data.models : [{ id: data.default || provider.model, label: data.default || provider.model }];
+                populateModels(models, modelOverride || data.default || provider.model);
+                modelSelect.disabled = false;
+            })
+            .catch(releaseWithFallback)
+            .finally(function () { clearTimeout(timeout); modelSelect.disabled = false; });
+    }
+
+    function applyProvider(providerKey, modelOverride) {
+        var provider = providerByKey(providerKey) || providers[0];
+        if (!provider) { return; }
+
+        providerSelect.value = provider.key;
+        loadModels(provider.key, modelOverride);
+    }
+
+    function persistSelection() {
+        try {
+            localStorage.setItem(STORAGE_PROVIDER, providerSelect.value);
+            localStorage.setItem(STORAGE_MODEL, modelSelect.value);
+        } catch (e) { /* stockage indisponible (navigation privee, quota) : tant pis */ }
+    }
+
+    if (providers.length) {
+        var storedProvider = null;
+        var storedModel    = null;
+        try {
+            storedProvider = localStorage.getItem(STORAGE_PROVIDER);
+            storedModel    = localStorage.getItem(STORAGE_MODEL);
+        } catch (e) { /* ignore */ }
+
+        // Un fournisseur mémorisé mais dont la clé a été retirée depuis ne
+        // doit pas rester sélectionné silencieusement.
+        var initialProvider = (storedProvider && providerByKey(storedProvider)) ? storedProvider : app.dataset.defaultProvider;
+        applyProvider(initialProvider, providerByKey(initialProvider) ? storedModel : null);
+
+        providerSelect.addEventListener('change', function () {
+            applyProvider(providerSelect.value, null);
+            persistSelection();
+        });
+        modelSelect.addEventListener('change', persistSelection);
+    }
 
     function headers() {
         return {
@@ -192,6 +352,13 @@
                     }
                 });
                 markActive(id);
+
+                // Rouvrir un fil replace les selecteurs sur ce qu'il a utilise
+                // en dernier ; l'utilisateur peut toujours en changer ensuite,
+                // pour ce tour comme pour les suivants.
+                if (providers.length && data.provider && providerByKey(data.provider)) {
+                    applyProvider(data.provider, data.model);
+                }
             });
     }
 
@@ -220,11 +387,92 @@
         if (row) { openConversation(row.dataset.id); }
     });
 
-    document.getElementById('witty-new').addEventListener('click', function () {
-        log.innerHTML = '';
-        markActive(null);
-        input.focus();
+    // ---- Recherche dans l'historique des messages ----
+
+    var searchInput   = document.getElementById('witty-search');
+    var searchResults = document.getElementById('witty-search-results');
+    var searchTimer   = null;
+    var searchSeq     = 0;
+
+    function escapeHtml(value) {
+        var div = document.createElement('div');
+        div.textContent = value == null ? '' : String(value);
+        return div.innerHTML;
+    }
+
+    // Encadre la premiere occurrence du terme cherche dans l'extrait renvoye
+    // par le serveur (deja escape ici, donc <mark> ajoute ensuite est sans
+    // risque d'injection).
+    function highlight(snippet, term) {
+        var escaped = escapeHtml(snippet);
+        var pattern = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        return escaped.replace(new RegExp('(' + pattern + ')', 'ig'), '<mark>$1</mark>');
+    }
+
+    function closeSearch() {
+        searchResults.classList.remove('open');
+        searchResults.innerHTML = '';
+    }
+
+    function runSearch(term) {
+        var seq = ++searchSeq;
+
+        fetch(app.dataset.searchEndpoint + '?q=' + encodeURIComponent(term), { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                if (seq !== searchSeq) { return; } // une frappe plus recente a deja relance une recherche
+
+                var results = data.results || [];
+
+                if (!results.length) {
+                    searchResults.innerHTML = '<div class="witty-search-empty">{{ 'mautic.witty.chat.search_empty'|trans|e('js') }}</div>';
+                    searchResults.classList.add('open');
+                    return;
+                }
+
+                searchResults.innerHTML = results.map(function (hit) {
+                    return '<div class="witty-search-hit" data-id="' + hit.conversation_id + '">' +
+                        '<div class="title">' + escapeHtml(hit.title) + '</div>' +
+                        '<div class="snippet">' + highlight(hit.snippet, term) + '</div>' +
+                    '</div>';
+                }).join('');
+                searchResults.classList.add('open');
+
+                searchResults.querySelectorAll('.witty-search-hit').forEach(function (el) {
+                    el.addEventListener('click', function () {
+                        openConversation(el.dataset.id);
+                        refreshConversations(el.dataset.id);
+                        closeSearch();
+                        searchInput.value = '';
+                    });
+                });
+            })
+            .catch(function () { /* recherche best-effort : une erreur reseau ne doit rien casser */ });
+    }
+
+    searchInput.addEventListener('input', function () {
+        var term = searchInput.value.trim();
+        clearTimeout(searchTimer);
+
+        if (!term) { closeSearch(); return; }
+
+        searchTimer = setTimeout(function () { runSearch(term); }, 300);
     });
+
+    document.addEventListener('click', function (event) {
+        if (!event.target.closest('#witty-search-wrap')) { closeSearch(); }
+    });
+
+    // Absent quand isConfigured est faux : le bouton n'est alors pas rendu
+    // du tout dans le bloc actions (cf. page-header), pas juste desactive.
+    var newBtn = document.getElementById('witty-new');
+    if (newBtn) {
+        newBtn.addEventListener('click', function () {
+            log.innerHTML = '';
+            markActive(null);
+            input.focus();
+        });
+    }
 
     function finish() {
         busy = false;
@@ -284,10 +532,17 @@
         pending.classList.add('witty-cursor');
         var trace = null;
 
+        var body = {
+            message: message,
+            conversation_id: conversationId,
+            provider: providers.length ? providerSelect.value : null,
+            model: providers.length ? modelSelect.value.trim() : null
+        };
+
         var request = fetch(streaming ? app.dataset.streamEndpoint : app.dataset.sendEndpoint, {
             method: 'POST',
             headers: headers(),
-            body: JSON.stringify({ message: message, conversation_id: conversationId })
+            body: JSON.stringify(body)
         });
 
         if (!streaming) {

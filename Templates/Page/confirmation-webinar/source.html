@@ -1,0 +1,707 @@
+<!DOCTYPE html>
+<html lang="[LANG]">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<!-- KEEP THIS. A confirmation page must never be indexed. If Google ranks
+     it, the join link leaks to people who never registered, your registration
+     numbers stop meaning anything, and the page competes with your actual
+     landing page in search results. -->
+<meta name="robots" content="noindex, nofollow">
+
+<!--
+════════════════════════════════════════════════════════════════════════════
+WEBINAR CONFIRMATION PAGE TEMPLATE
+The page a registrant lands on right after submitting the form. It changes
+itself based on the current time: countdown before, join button during,
+replay message after. Works for any topic, any date.
+════════════════════════════════════════════════════════════════════════════
+
+WHAT THIS PAGE IS FOR, AND WHY IT IS NOT WHAT MOST PEOPLE THINK
+The landing page optimises registrations. This page optimises ATTENDANCE.
+Those are different problems, and this one is the expensive problem: typical
+webinar no show rates sit somewhere between 40% and 65%. You already paid to
+acquire the registration. Everything on this page exists to protect it.
+
+There is no persuasion left to do here. The person already said yes. So the
+job is narrower and more mechanical:
+  1. Confirm the yes so they stop worrying it did not go through.
+  2. Get the event into their calendar, with a reminder, before they close
+     the tab. This is the single biggest attendance lever you control.
+  3. Keep the commitment alive between now and the event.
+  4. Be the place they come back to when it starts.
+
+THAT LAST POINT IS THE ONE PEOPLE MISS. This page is not a receipt, it is a
+destination. Because it rewrites itself when the event starts, the same URL
+works as a pre event countdown and as the join button on the day. Tell people
+to bookmark it, put the URL in every reminder email, and you stop losing the
+registrants who cannot find the link when it matters.
+
+THE THREE STATES
+  before → countdown plus calendar buttons
+  live   → one button, everything else stripped away
+  ended  → replay message, no dead end
+Switching is automatic, driven by the clock against the config below. Nothing
+to do on the day.
+
+HOW TO USE THIS FILE
+- Edit the config block only. Everything else reads from it.
+- Every [PLACEHOLDER] in brackets needs replacing. Search for "[" at the end.
+- To test a state without waiting: temporarily change startDate to a moment
+  in the past, reload, then change it back. Do not forget to change it back.
+════════════════════════════════════════════════════════════════════════════
+-->
+
+<title>[Ex. "Registration confirmed"] — [Webinar name]</title>
+
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+<script>
+/* ══════════════════════════════════════════════════════════════════════════
+   WEBINAR CONFIG — this is the only block you edit between events.
+   The countdown, the state switching, the calendar invites and the displayed
+   date all read from here. Change these nine values and the page is ready
+   for a completely different webinar.
+   ══════════════════════════════════════════════════════════════════════════ */
+const WEBINAR_CONFIG = {
+
+  // Event name. Appears in the calendar invite, so make it recognisable in a
+  // crowded calendar three weeks from now. Include the topic, not just
+  // "Webinar". They will see this line and nothing else at 10:25.
+  title: "[EVENT NAME + topic]",
+
+  // Start time, ISO 8601, with the UTC offset at the end.
+  // ⚠ THE OFFSET IS NOT DECORATIVE. It is what makes the countdown correct
+  // for a visitor in another country. Get it wrong and everyone outside your
+  // timezone arrives at the wrong hour.
+  // ⚠ DAYLIGHT SAVING: the offset changes twice a year. Western Europe is
+  // +01:00 in summer and +00:00 in winter. Central Europe is +02:00 then
+  // +01:00. Check the offset for the actual event date, not for today.
+  startDate: "[YYYY-MM-DDTHH:MM:SS+00:00]",
+
+  // IANA timezone name, used to display the date in the EVENT's timezone
+  // rather than the visitor's. Without this, someone in Brazil sees a time
+  // that is technically correct but does not match what your emails say,
+  // which reads as a mistake. Ex: "Europe/Lisbon", "Europe/Paris",
+  // "America/New_York".
+  timeZone: "[Region/City]",
+
+  // Locale for the displayed date. Ex: "pt-PT", "en-GB", "fr-FR".
+  locale: "[xx-XX]",
+
+  // Length in minutes. Two jobs: it sets the end time in the calendar invite,
+  // and it decides when the page flips from live to ended.
+  // ⚠ Add 15 to 20 minutes of buffer for the Q and A. If this is too short,
+  // the join button disappears while you are still on air and latecomers hit
+  // a "we are done" screen during the session.
+  durationMinutes: 90,
+
+  // The join link (Meet, Zoom, Teams, your own room).
+  // ⚠ This is visible in the page source from the moment the page is live.
+  // Anyone who finds the URL can read it. If the session must stay private,
+  // use a room that requires a per registrant token, or generate the link
+  // per contact and email it instead of hardcoding it here.
+  joinLink: "[https://...]",
+
+  // Description inside the calendar invite. This is the most under used field
+  // on the page: it is the one piece of your copy that sits inside their
+  // calendar for weeks, and it is what they reread right before deciding
+  // whether to show up. Put the join link in it, and repeat the live only
+  // bonus. That reminder is doing real work at 10:25 on the day.
+  description: "[One line on what the session is + the live only bonus + the join link]",
+
+  // Location field of the invite. "Online" plus the event name is enough.
+  location: "[Ex. 'Online — [event name]']",
+
+  // Filename for the downloaded .ics. Lowercase, no spaces.
+  fileName: "[event-slug]"
+};
+/* ══════════════════════════════════════════════════════════════════════════ */
+</script>
+
+<style>
+/* ══════════════════════════════════════════════════════════════════════════
+   DESIGN TOKENS
+   Same system as the landing page: define it once here, never hardcode a
+   value below. Keeping these two pages visually identical matters more than
+   usual, because the visitor crosses from one to the other in a single click.
+   A confirmation page that looks like a different website makes people
+   wonder, for half a second, whether the form actually worked.
+   ══════════════════════════════════════════════════════════════════════════ */
+:root{
+  --bg:        #000000;
+  --fg:        #ffffff;
+  --accent:    #FF3D2E;
+  --muted:     rgba(255,255,255,.75);
+  --muted-2:   rgba(255,255,255,.5);
+  --muted-3:   rgba(255,255,255,.45);
+  --hairline:  rgba(255,255,255,.15);
+  --hairline-2:rgba(255,255,255,.08);
+  --surface:   rgba(255,255,255,.03);
+
+  /* Spacing scale. Pick from these, never invent a value in between. */
+  --s1:8px; --s2:12px; --s3:16px; --s4:22px; --s5:32px;
+  --s6:40px; --s7:56px; --s8:72px;
+}
+
+*{margin:0;padding:0;box-sizing:border-box}
+
+body{
+  font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+  background:var(--bg);
+  color:var(--fg);
+  min-height:100vh;
+  display:flex;
+  flex-direction:column;
+  overflow-x:hidden;
+}
+
+/* Grain and glow. Purely atmospheric, and that is allowed here: this page has
+   almost no content, so texture is what stops it feeling like an error page.
+   Both sit behind everything and never intercept clicks. */
+.grain{
+  position:fixed; inset:0; pointer-events:none;
+  opacity:.35; mix-blend-mode:overlay; z-index:0;
+  background-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/><feColorMatrix type='saturate' values='0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+}
+.glow{
+  position:fixed; bottom:-40vh; left:50%; transform:translateX(-50%);
+  width:120vw; height:80vh; pointer-events:none; z-index:0;
+  background:radial-gradient(ellipse at center, rgba(255,61,46,.22) 0%, transparent 60%);
+}
+
+.wrap{
+  position:relative; z-index:1; flex:1;
+  display:flex; flex-direction:column;
+  align-items:center; justify-content:center; text-align:center;
+  padding:var(--s8) var(--s4);
+  max-width:1000px; margin:0 auto; width:100%;
+}
+
+/* ── CONFIRMATION BADGE ────────────────────────────────────────────────────
+   The tick that animates in on load. It is not decoration: the first question
+   in a registrant's head is "did that actually go through". Answering it in
+   the first 200ms, before they read a single word, is why this sits above the
+   headline. It hides itself once the event is over, when it no longer means
+   anything. */
+.check-badge{
+  width:64px; height:64px;
+  border:1px solid var(--accent); border-radius:50%;
+  display:flex; align-items:center; justify-content:center;
+  margin-bottom:var(--s5);
+  animation:pop .5s cubic-bezier(.2,1.4,.4,1) both;
+}
+.check-badge svg{
+  width:28px; height:28px; stroke:var(--accent);
+  stroke-width:3; fill:none; stroke-linecap:round; stroke-linejoin:round;
+}
+@keyframes pop{from{transform:scale(.4);opacity:0}to{transform:scale(1);opacity:1}}
+
+/* ── STATE SWITCHING ───────────────────────────────────────────────────────
+   Everything is in the DOM at all times; only CSS decides what is visible,
+   driven by the data-state attribute on <body>. No template engine, no
+   server logic, no build step. Paste the page anywhere and it works.
+   The three states never overlap, so you can safely style each one as if it
+   were the only thing on the page. */
+.header-text{display:none;flex-direction:column;align-items:center}
+#state-before,#state-live,#state-ended{display:none;flex-direction:column;align-items:center}
+
+body[data-state="before"] #header-before{display:flex}
+body[data-state="before"] #state-before{display:flex}
+
+body[data-state="live"] #header-live{display:flex}
+body[data-state="live"] #state-live{display:flex}
+body[data-state="live"] .live-badge{display:flex}
+body[data-state="live"] .countdown,
+body[data-state="live"] .countdown-label{display:none}
+
+body[data-state="ended"] #header-ended{display:flex}
+body[data-state="ended"] #state-ended{display:flex}
+body[data-state="ended"] .countdown,
+body[data-state="ended"] .countdown-label{display:none}
+body[data-state="ended"] .event-date{display:none}
+body[data-state="ended"] .check-badge{display:none}
+
+.eyebrow{
+  font-family:'Poppins',sans-serif;
+  font-size:13px; font-weight:600; letter-spacing:3px;
+  text-transform:uppercase; color:var(--accent);
+  margin-bottom:18px;
+}
+h1{
+  font-family:'Poppins',sans-serif;
+  font-size:52px; font-weight:800;
+  letter-spacing:-2px; line-height:1.12;
+  margin-bottom:var(--s3);
+}
+.subtitle{
+  font-size:18px; font-weight:300; color:var(--muted);
+  letter-spacing:.3px; max-width:560px;
+  margin:0 auto var(--s2); line-height:1.6;
+}
+.event-date{
+  font-family:'Poppins',sans-serif;
+  font-size:13px; font-weight:600; letter-spacing:2px;
+  text-transform:uppercase;
+  border:1px solid var(--accent);
+  padding:var(--s2) var(--s4);
+  display:inline-block;
+  margin-top:var(--s4); margin-bottom:var(--s7);
+}
+
+/* ── COUNTDOWN ─────────────────────────────────────────────────────────────
+   tabular-nums is load bearing. Without it, proportional digits change width
+   as the seconds tick and the whole row jitters. It is the difference between
+   a countdown that feels engineered and one that feels amateur. */
+.countdown-label{
+  font-family:'Poppins',sans-serif;
+  font-size:12px; font-weight:600; letter-spacing:3px;
+  text-transform:uppercase; color:var(--muted-2);
+  margin-bottom:var(--s4);
+}
+.countdown{display:flex;gap:var(--s3);justify-content:center;margin-bottom:var(--s7)}
+.count-cell{
+  min-width:130px;
+  padding:28px var(--s2) var(--s4);
+  border:1px solid var(--hairline);
+  border-top:3px solid var(--accent);
+  background:var(--surface);
+}
+.count-num{
+  font-family:'Poppins',sans-serif;
+  font-size:56px; font-weight:800; letter-spacing:-2px; line-height:1;
+  font-variant-numeric:tabular-nums;
+}
+.count-unit{
+  font-family:'Poppins',sans-serif;
+  font-size:11px; font-weight:600; letter-spacing:2px;
+  text-transform:uppercase; color:var(--muted-2); margin-top:10px;
+}
+
+/* ── LIVE BADGE ────────────────────────────────────────────────────────────
+   The expanding ring is the one animation worth keeping at full strength: it
+   is the visual vocabulary of a live broadcast, and it tells someone landing
+   mid session that this is happening RIGHT NOW rather than being a page that
+   forgot to update. */
+.live-badge{
+  display:none; align-items:center; gap:10px;
+  font-family:'Poppins',sans-serif;
+  font-size:14px; font-weight:700; letter-spacing:3px;
+  text-transform:uppercase; color:var(--accent);
+  margin-bottom:var(--s6);
+}
+.live-dot{
+  width:12px;height:12px;border-radius:50%;
+  background:var(--accent);
+  animation:pulse 1.2s ease-in-out infinite;
+}
+@keyframes pulse{
+  0%,100%{box-shadow:0 0 0 0 rgba(255,61,46,.6);opacity:1}
+  50%{box-shadow:0 0 0 14px rgba(255,61,46,0);opacity:.7}
+}
+
+/* ── BUTTONS ───────────────────────────────────────────────────────────── */
+.actions{display:flex;flex-direction:column;align-items:center;gap:18px}
+.btn{
+  font-family:'Poppins',sans-serif;
+  font-size:14px; font-weight:700; letter-spacing:1.5px;
+  text-transform:uppercase;
+  padding:var(--s4) 48px;
+  border:1px solid var(--accent);
+  background:transparent; color:var(--fg);
+  cursor:pointer; text-decoration:none;
+  display:inline-flex; align-items:center; gap:var(--s2);
+  transition:all .2s ease;
+}
+.btn svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.btn-primary{background:var(--accent);color:var(--fg)}
+.btn-primary:hover{background:transparent;color:var(--accent)}
+.btn-ghost:hover{background:var(--accent);color:var(--fg)}
+
+/* The live button is deliberately louder than anything else on any state:
+   bigger, glowing, breathing. At the moment it appears it is the only thing
+   that matters, and there is no competing element left on screen. */
+.btn-live{
+  font-size:16px; padding:var(--s5) 64px;
+  background:var(--accent);
+  box-shadow:0 0 40px rgba(255,61,46,.45);
+  animation:breathe 2s ease-in-out infinite;
+}
+@keyframes breathe{
+  0%,100%{box-shadow:0 0 30px rgba(255,61,46,.35)}
+  50%{box-shadow:0 0 55px rgba(255,61,46,.6)}
+}
+.btn-live:hover{background:var(--fg);color:var(--accent);border-color:var(--fg)}
+
+.hint{font-size:13px;color:var(--muted-3);letter-spacing:.3px;max-width:460px;line-height:1.6}
+a:focus-visible,button:focus-visible{outline:2px solid var(--fg);outline-offset:3px}
+
+/* ── FOOTER ────────────────────────────────────────────────────────────── */
+.footer{
+  position:relative; z-index:1; text-align:center;
+  padding:var(--s6) var(--s4);
+  font-size:13px; color:rgba(255,255,255,.4);
+  border-top:1px solid var(--hairline-2);
+}
+.footer a{color:rgba(255,255,255,.6);text-decoration:none}
+.footer a:hover{color:var(--accent)}
+.footer-legal{margin-top:10px}
+
+@media (prefers-reduced-motion: reduce){
+  *{animation:none !important;transition:none !important}
+}
+
+@media (max-width:768px){
+  .wrap{padding:var(--s7) var(--s4)}
+  h1{font-size:34px;letter-spacing:-1px}
+  .subtitle{font-size:16px}
+  .event-date{margin-bottom:var(--s6)}
+  /* Four cells across on a phone: cramped but readable, and it keeps the
+     whole countdown on one line. Two by two would push the buttons below
+     the fold, which is exactly where they must not be. */
+  .countdown{gap:var(--s1);flex-wrap:wrap;margin-bottom:var(--s6)}
+  .count-cell{min-width:0;flex:1 1 calc(25% - 8px);padding:18px 6px 14px}
+  .count-num{font-size:32px;letter-spacing:-1px}
+  .count-unit{font-size:9px;letter-spacing:1px}
+  .btn{padding:18px var(--s5);font-size:13px}
+  .btn-live{padding:var(--s4) var(--s6);font-size:14px}
+}
+</style>
+</head>
+
+<body data-state="before">
+
+<div class="grain"></div>
+<div class="glow"></div>
+
+<div class="wrap">
+
+  <div class="check-badge">
+    <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════
+       HEADERS, ONE PER STATE
+       Only one is ever visible. Write all three now, while you have the
+       context: coming back to write the ended copy on the day of the event
+       is how pages end up saying "your seat is confirmed" three hours after
+       the webinar finished.
+       ═══════════════════════════════════════════════════════════════════════ -->
+
+  <!-- STATE: BEFORE
+       WHY: three jobs in three lines. The eyebrow confirms (anxiety gone).
+       The headline uses possessive language, "your seat", because ownership
+       language triggers the endowment effect: something you own is something
+       you do not want to lose, and that is what gets someone to show up.
+       The subtitle does the real work: it tells them to expect an email
+       (so the confirmation email does not look like spam) and it plants the
+       live only bonus, which is the reason to attend rather than wait for
+       the replay.
+       HOW: headline 3 to 5 words, broken across two lines. Second person
+       throughout. Never say "thank you for registering" as the headline:
+       it is about you, and it says nothing about what happens next. -->
+  <div class="header-text" id="header-before">
+    <p class="eyebrow">[Ex. "Registration confirmed"]</p>
+    <h1>[3 to 5 words with ownership language.<br>Ex. "Your seat is<br>secured."]</h1>
+    <p class="subtitle">[Confirmation email is on its way + save the date + the bonus is live attendees only.]</p>
+  </div>
+
+  <!-- STATE: LIVE
+       WHY: the psychology flips completely. Before the event you are managing
+       intent; now you are removing friction from a decision already made. The
+       reader is possibly on their phone, possibly late, definitely not
+       reading. Every word that is not "get in now" is in the way.
+       HOW: headline states the fact ("it has started"), subtitle gives one
+       reason to move immediately. Mentioning the bonus here is deliberate:
+       it converts "I will catch the replay" back into "I should join now". -->
+  <div class="header-text" id="header-live">
+    <p class="eyebrow">[Ex. "Live now"]</p>
+    <h1>[Ex. "The webinar has<br>started."]</h1>
+    <p class="subtitle">[One line: join now, and why waiting for the replay costs them something.]</p>
+  </div>
+
+  <!-- STATE: ENDED
+       WHY: this is the state everyone forgets, and it is the one that runs
+       longest. This page will sit at this state for months, collecting
+       traffic from every old email, every shared link, every bookmark. A
+       broken or stale ending here is a slow leak of goodwill.
+       HOW: acknowledge, thank, and set a concrete expectation with a
+       timeframe ("in the next few hours", "tomorrow morning"). Never leave
+       them at a dead end. See the optional block further down for turning
+       this state into a signup for the next session.
+       ⚠ If you promise the recording here, send the recording. This page
+       makes a promise you have to keep weeks later, when nobody is watching. -->
+  <div class="header-text" id="header-ended">
+    <p class="eyebrow">[Ex. "This session has ended"]</p>
+    <h1>[Ex. "That's a wrap<br>for today."]</h1>
+    <p class="subtitle">[Thanks + what happens next, with a concrete timeframe for the recording.]</p>
+  </div>
+
+  <!-- EVENT DATE
+       Filled in by the script from the config, formatted in the EVENT's
+       timezone, not the visitor's. Hidden automatically once it is over.
+       Leave the em dash placeholder: it is what shows for the split second
+       before the script runs. -->
+  <div class="event-date" id="event-date-display">📅 —</div>
+
+  <!-- COUNTDOWN
+       WHY: it converts an abstract future commitment into something that is
+       visibly moving. Two effects worth knowing. First, a running clock
+       raises the salience of a commitment that would otherwise fade the
+       moment the tab closes. Second, it gives the page a reason to be
+       revisited, which is exactly the habit you want, because this same URL
+       becomes the join button on the day.
+       ⚠ Do not run a countdown to a deadline that does not exist. Fake
+       urgency is detectable and it is the single fastest way to lose a list.
+       Here the deadline is real: the session genuinely starts at that
+       moment, which is why this one is honest. -->
+  <p class="countdown-label">[Ex. "The webinar starts in"]</p>
+  <div class="countdown" id="countdown">
+    <div class="count-cell"><div class="count-num" id="cd-days">00</div><div class="count-unit">[Days]</div></div>
+    <div class="count-cell"><div class="count-num" id="cd-hours">00</div><div class="count-unit">[Hours]</div></div>
+    <div class="count-cell"><div class="count-num" id="cd-mins">00</div><div class="count-unit">[Minutes]</div></div>
+    <div class="count-cell"><div class="count-num" id="cd-secs">00</div><div class="count-unit">[Seconds]</div></div>
+  </div>
+
+  <div class="live-badge"><span class="live-dot"></span> [Ex. "Live now"]</div>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════
+       ACTIONS, ONE SET PER STATE
+       ═══════════════════════════════════════════════════════════════════════ -->
+
+  <!-- BEFORE: THE CALENDAR BUTTONS
+       WHY THIS IS THE MOST IMPORTANT ELEMENT ON THE PAGE:
+       An event that is not in someone's calendar does not exist. They will be
+       in a meeting at 10:30, or they will simply forget, and no amount of
+       reminder emails fully fixes what a calendar entry with an alarm fixes
+       for free. If you only get one thing from this page, get the click on
+       one of these two buttons.
+       That is why they are the primary visual action, why there are exactly
+       two of them, and why nothing else competes.
+       HOW:
+         • Two buttons covers essentially everyone: Google for one half of the
+           world, the .ics file for Apple Calendar, Outlook and everything
+           else. Do not add a third: choice paralysis on a two option
+           decision is real and there is nothing to gain.
+         • Google is the primary (filled) button because it is one click with
+           no download and no file to open. The .ics is the ghost button.
+         • The .ics generated below carries a 15 minute alarm. That alarm is
+           quietly the highest ROI line of code in this entire file.
+       THE HINT LINE: tell them the join link comes by email AND that they can
+       come back to this page. Making this URL the known destination is what
+       saves the registrants who cannot find your email on the day. -->
+  <div id="state-before" class="actions">
+    <a class="btn btn-primary" id="btn-gcal" target="_blank" rel="noopener">
+      <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+      [Ex. "Add to Google Calendar"]
+    </a>
+    <a class="btn btn-ghost" id="btn-ics">
+      <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      [Ex. "Download .ics (Apple / Outlook)"]
+    </a>
+    <p class="hint">[Two things: the access link arrives by email, and they can bookmark this page to join from here.]</p>
+  </div>
+
+  <!-- LIVE: ONE BUTTON, NOTHING ELSE
+       WHY: a single decision, made enormous. The countdown, the calendar
+       buttons and the date badge have all disappeared by this point, by
+       design. Someone arriving at 10:32 should not have to parse a layout.
+       HOW: label starts with a verb and points forward. The hint underneath
+       is the last nudge for anyone hesitating because they are already a few
+       minutes late. Reassure them it is worth joining anyway. -->
+  <div id="state-live" class="actions">
+    <a class="btn btn-live" id="btn-join" target="_blank" rel="noopener">
+      [Ex. "Join the webinar"] →
+    </a>
+    <p class="hint">[One line for latecomers: it just started, join now, the bonus is for live attendees.]</p>
+  </div>
+
+  <!-- ENDED: NO DEAD END -->
+  <div id="state-ended" class="actions">
+    <p class="hint">[Ex. "Keep an eye on your inbox over the next few hours."]</p>
+
+    <!-- OPTIONAL, and worth doing if you run this webinar more than once.
+         This page keeps receiving traffic for months from old emails and
+         shared links. Every one of those visitors is someone interested
+         enough to click, arriving at a page that currently tells them they
+         missed it and offers nothing. Uncomment and point this at the
+         registration page for the next session, and this becomes a small
+         permanent acquisition channel instead of a dead end.
+    <a class="btn btn-primary" href="[URL of the next session]">[Ex. "Save my seat for the next one"]</a>
+    -->
+  </div>
+
+</div>
+
+<!-- FOOTER
+     Same reasoning as the landing page: legal only. No navigation, nothing to
+     click away to. Copyright, privacy policy, terms, done. -->
+<div class="footer">
+  <p>© [YEAR] [Brand name]. [Rights statement.]</p>
+  <p class="footer-legal">
+    <a href="[URL privacy policy]">[Privacy Policy]</a> &nbsp;|&nbsp;
+    <a href="[URL terms]">[Terms of Service]</a>
+  </p>
+</div>
+
+<script>
+(function(){
+  const cfg   = WEBINAR_CONFIG;
+  const start = new Date(cfg.startDate);
+  const end   = new Date(start.getTime() + cfg.durationMinutes * 60000);
+
+  /* Fail loudly in the console rather than silently showing a broken page.
+     A confirmation page that quietly renders NaN is worse than one that
+     does not render, because nobody notices until the registrations stop. */
+  if (isNaN(start.getTime())) {
+    console.error('WEBINAR_CONFIG.startDate is not a valid ISO date:', cfg.startDate);
+    return;
+  }
+
+  /* ── Displayed date ─────────────────────────────────────────────────────
+     Forced into the event's timezone so it always matches what your emails
+     and landing page say, whatever country the visitor is in. The short
+     timezone label at the end is what prevents an international registrant
+     from doing the conversion wrong in their head. */
+  const dateFmt = new Intl.DateTimeFormat(cfg.locale, {
+    weekday:'long', day:'numeric', month:'long',
+    hour:'2-digit', minute:'2-digit',
+    timeZone:cfg.timeZone, timeZoneName:'short'
+  });
+  document.getElementById('event-date-display').textContent = '📅 ' + dateFmt.format(start);
+
+  /* ── Calendar links ─────────────────────────────────────────────────────
+     Both formats want UTC timestamps like 20260730T093000Z. toISOString
+     already returns UTC, so the conversion is just stripping separators and
+     milliseconds. This is why the offset in startDate matters so much: it is
+     the only thing that tells the browser which absolute instant you meant. */
+  const toStamp = d => d.toISOString().replace(/[-:]/g,'').replace(/\.\d{3}/,'');
+
+  const gcalUrl = 'https://calendar.google.com/calendar/render?action=TEMPLATE'
+    + '&text='     + encodeURIComponent(cfg.title)
+    + '&dates='    + toStamp(start) + '/' + toStamp(end)
+    + '&details='  + encodeURIComponent(cfg.description)
+    + '&location=' + encodeURIComponent(cfg.location);
+  document.getElementById('btn-gcal').href = gcalUrl;
+
+  /* The .ics spec requires backslashes, semicolons, commas and newlines to be
+     escaped inside text values. Skip this and a single comma in your event
+     title silently truncates the invite in some calendar clients. */
+  const esc = s => String(s)
+    .replace(/\\/g,'\\\\')
+    .replace(/;/g,'\\;')
+    .replace(/,/g,'\\,')
+    .replace(/\r?\n/g,'\\n');
+
+  const ics = [
+    'BEGIN:VCALENDAR','VERSION:2.0','CALSCALE:GREGORIAN',
+    'PRODID:-//' + cfg.title + '//EN',
+    'BEGIN:VEVENT',
+    'UID:' + Date.now() + '-' + Math.random().toString(36).slice(2) + '@webinar',
+    'DTSTAMP:' + toStamp(new Date()),
+    'DTSTART:' + toStamp(start),
+    'DTEND:'   + toStamp(end),
+    'SUMMARY:'     + esc(cfg.title),
+    'DESCRIPTION:' + esc(cfg.description),
+    'LOCATION:'    + esc(cfg.location),
+    'URL:'         + cfg.joinLink,
+    /* The 15 minute alarm. Quietly the highest leverage line in the file:
+       it is an unprompted reminder, on the day, on whatever device they
+       actually use, delivered by software they already trust. */
+    'BEGIN:VALARM','TRIGGER:-PT15M','ACTION:DISPLAY',
+    'DESCRIPTION:' + esc(cfg.title),
+    'END:VALARM',
+    'END:VEVENT','END:VCALENDAR'
+  ].join('\r\n');
+
+  /* A Blob URL rather than a data: URI. data: downloads are blocked or
+     mishandled by several mobile browsers, and this button is clicked on a
+     phone more often than not. */
+  const icsBtn = document.getElementById('btn-ics');
+  icsBtn.href = URL.createObjectURL(new Blob([ics], {type:'text/calendar;charset=utf-8'}));
+  icsBtn.setAttribute('download', cfg.fileName + '.ics');
+
+  document.getElementById('btn-join').href = cfg.joinLink;
+
+  /* ── Countdown and state machine ────────────────────────────────────────
+     One interval drives everything. Order matters: check ended first, then
+     live, then fall through to before. Reversing it means a page loaded
+     after the event briefly flashes the live state. */
+  const el = {
+    days:  document.getElementById('cd-days'),
+    hours: document.getElementById('cd-hours'),
+    mins:  document.getElementById('cd-mins'),
+    secs:  document.getElementById('cd-secs')
+  };
+  const pad = n => String(n).padStart(2,'0');
+  let timer;
+
+  function tick(){
+    const now = new Date();
+
+    if (now >= end){
+      document.body.dataset.state = 'ended';
+      clearInterval(timer);
+      return;
+    }
+    if (now >= start){
+      document.body.dataset.state = 'live';
+      return;
+    }
+
+    document.body.dataset.state = 'before';
+    let diff = Math.floor((start - now) / 1000);
+    const d = Math.floor(diff / 86400); diff -= d * 86400;
+    const h = Math.floor(diff / 3600);  diff -= h * 3600;
+    const m = Math.floor(diff / 60);
+    const s = diff - m * 60;
+    el.days.textContent  = pad(d);
+    el.hours.textContent = pad(h);
+    el.mins.textContent  = pad(m);
+    el.secs.textContent  = pad(s);
+  }
+
+  tick();
+  timer = setInterval(tick, 1000);
+
+  /* ── Conversion tracking ────────────────────────────────────────────────
+     This page, not the form, is where the conversion event belongs: reaching
+     it proves the submission actually completed. Drop your pixel or event
+     call here.
+     Ex: gtag('event','webinar_registration',{event_category:'webinar'});
+     Ex: fbq('track','Lead');
+     Note the page is noindex, which does not affect tracking. */
+
+})();
+</script>
+
+<!--
+════════════════════════════════════════════════════════════════════════════
+PRE LAUNCH CHECKLIST
+□ startDate offset correct FOR THAT DATE, daylight saving included.
+□ timeZone and locale set. Date on screen matches the emails exactly.
+□ durationMinutes includes Q and A buffer, so the join button outlives the
+  session rather than the other way round.
+□ All three header states written, including ended.
+□ Every [BRACKET] replaced. Run a find on "[".
+□ Google Calendar button tested: right title, right time, right description
+  with the join link inside it.
+□ .ics downloaded and opened on a real phone. Check the 15 minute alarm is
+  there and the time is right.
+□ Join link tested from a logged out browser, in a private window.
+□ noindex tag still in place.
+□ Conversion tracking firing.
+□ All three states tested by temporarily shifting startDate, then restored.
+□ Page URL added to every reminder email so this becomes the known way in.
+
+AFTER THE WEBINAR
+Leave the page up. It flips to the ended state on its own. If you run the
+session again, either point the ended state at the next registration page
+using the optional block above, or update the config and the same URL becomes
+a live countdown again.
+════════════════════════════════════════════════════════════════════════════
+-->
+
+</body>
+</html>

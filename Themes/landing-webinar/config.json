@@ -1,0 +1,9 @@
+{
+  "name": "Webinar Landing Page",
+  "author": "Witty",
+  "authorUrl": "https://github.com/ilannjoaquim/witty-m",
+  "builder": ["grapesjsbuilder"],
+  "features": [
+    "page"
+  ]
+}

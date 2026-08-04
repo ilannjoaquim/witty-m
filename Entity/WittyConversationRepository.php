@@ -43,4 +43,31 @@ class WittyConversationRepository extends CommonRepository
             ->getQuery()
             ->getOneOrNullResult();
     }
+
+    /**
+     * Recherche plein texte (LIKE) dans les messages user/assistant des
+     * conversations de l'utilisateur. Les messages d'outils sont exclus : ils
+     * ne veulent rien dire pour l'utilisateur qui cherche un souvenir precis.
+     *
+     * @return array<int, array{conversation_id:int, title:string, role:string, content:string, dateAdded: \DateTimeInterface}>
+     */
+    public function searchMessages(int $userId, string $term, int $limit = 25): array
+    {
+        // Echappe les jokers LIKE : un terme contenant '%' ou '_' ne doit pas
+        // se comporter comme un motif, l'utilisateur cherche un texte litteral.
+        $escaped = addcslashes($term, '%_\\');
+
+        return $this->createQueryBuilder('c')
+            ->select('c.id AS conversation_id', 'c.title AS title', 'm.role AS role', 'm.content AS content', 'm.dateAdded AS dateAdded')
+            ->join('c.messages', 'm')
+            ->where('IDENTITY(c.user) = :userId')
+            ->andWhere("m.role IN ('user', 'assistant')")
+            ->andWhere('m.content LIKE :term')
+            ->setParameter('userId', $userId)
+            ->setParameter('term', '%'.$escaped.'%')
+            ->orderBy('m.dateAdded', 'DESC')
+            ->setMaxResults($limit)
+            ->getQuery()
+            ->getResult();
+    }
 }

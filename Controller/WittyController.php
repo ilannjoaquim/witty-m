@@ -9,6 +9,7 @@ use MauticPlugin\WittyBundle\Entity\WittyConversation;
 use MauticPlugin\WittyBundle\Service\Agent\AgentRunner;
 use MauticPlugin\WittyBundle\Service\Conversation\ConversationManager;
 use MauticPlugin\WittyBundle\Service\Conversation\ConversationNotFoundException;
+use MauticPlugin\WittyBundle\Service\Llm\ModelCatalog;
 use MauticPlugin\WittyBundle\Service\Usage\QuotaExceededException;
 use MauticPlugin\WittyBundle\Service\Usage\UsageGuard;
 use MauticPlugin\WittyBundle\Service\WittyConfig;
@@ -24,14 +25,23 @@ class WittyController extends CommonController
         ConversationManager $conversations,
         UsageGuard $usageGuard,
     ): Response {
+        $providers = array_map(
+            static fn (string $provider): array => [
+                'key'   => $provider,
+                'label' => $config->getProviderLabel($provider),
+                'model' => $config->getModel($provider),
+            ],
+            $config->getConfiguredProviders(),
+        );
+
         return $this->delegateView([
             'viewParameters' => [
-                'isConfigured'  => $config->isConfigured(),
-                'provider'      => $config->getProvider(),
-                'model'         => $config->getModel(),
-                'streaming'     => $config->isStreamingEnabled(),
-                'conversations' => $conversations->listForCurrentUser(),
-                'usage'         => $usageGuard->getStatus(),
+                'isConfigured'    => $config->isConfigured(),
+                'providers'       => $providers,
+                'defaultProvider' => $config->getDefaultProvider(),
+                'streaming'       => $config->isStreamingEnabled(),
+                'conversations'   => $conversations->listForCurrentUser(),
+                'usage'           => $usageGuard->getStatus(),
             ],
             'contentTemplate' => '@Witty/Chat/index.html.twig',
             'passthroughVars' => [
@@ -54,11 +64,11 @@ class WittyController extends CommonController
             return new JsonResponse(['error' => 'Payload invalide.'], Response::HTTP_BAD_REQUEST);
         }
 
-        [$message, $conversationId] = $payload;
+        [$message, $conversationId, $provider, $model] = $payload;
 
         try {
             $conversation = $conversations->resolve($conversationId);
-            $result       = $agentRunner->run($conversation, $message);
+            $result       = $agentRunner->run($conversation, $message, null, $provider, $model);
         } catch (ConversationNotFoundException $e) {
             return new JsonResponse(['error' => $e->getMessage()], Response::HTTP_NOT_FOUND);
         } catch (QuotaExceededException $e) {
@@ -81,13 +91,13 @@ class WittyController extends CommonController
             return new JsonResponse(['error' => 'Payload invalide.'], Response::HTTP_BAD_REQUEST);
         }
 
-        [$message, $conversationId] = $payload;
+        [$message, $conversationId, $provider, $model] = $payload;
 
         // La session est verrouillee pendant toute la requete : sans fermeture
         // explicite, le reste de l'interface Mautic attendrait la fin du flux.
         $request->getSession()->save();
 
-        $response = new StreamedResponse(function () use ($agentRunner, $conversations, $message, $conversationId): void {
+        $response = new StreamedResponse(function () use ($agentRunner, $conversations, $message, $conversationId, $provider, $model): void {
             $emit = function (string $event, array $data): void {
                 echo 'event: '.$event."\n";
                 echo 'data: '.json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)."\n\n";
@@ -103,7 +113,7 @@ class WittyController extends CommonController
 
             try {
                 $conversation = $conversations->resolve($conversationId);
-                $result       = $agentRunner->run($conversation, $message, $emit);
+                $result       = $agentRunner->run($conversation, $message, $emit, $provider, $model);
 
                 $emit('done', $result + ['conversation_id' => $conversation->getId()]);
             } catch (ConversationNotFoundException|QuotaExceededException $e) {
@@ -131,6 +141,34 @@ class WittyController extends CommonController
         return new JsonResponse(['conversations' => $conversations->listForCurrentUser()]);
     }
 
+    public function searchAction(Request $request, ConversationManager $conversations): JsonResponse
+    {
+        $term = trim((string) $request->query->get('q', ''));
+
+        if ('' === $term) {
+            return new JsonResponse(['results' => []]);
+        }
+
+        return new JsonResponse(['results' => $conversations->search($term)]);
+    }
+
+    /**
+     * Liste des modeles disponibles pour un fournisseur configure, pour peupler
+     * le menu deroulant du chat. Jamais vide : ModelCatalog replie sur le modele
+     * par defaut si l'appel au fournisseur echoue.
+     */
+    public function modelsAction(string $provider, WittyConfig $config, ModelCatalog $catalog): JsonResponse
+    {
+        if (!$config->isProviderConfigured($provider)) {
+            return new JsonResponse(['error' => 'Fournisseur non configure.'], Response::HTTP_NOT_FOUND);
+        }
+
+        return new JsonResponse([
+            'models'  => $catalog->getModels($provider),
+            'default' => $config->getModel($provider),
+        ]);
+    }
+
     public function conversationAction(int $id, ConversationManager $conversations): JsonResponse
     {
         try {
@@ -144,6 +182,8 @@ class WittyController extends CommonController
             'title'           => $conversation->getTitle(),
             'transcript'      => $conversations->toDisplayTranscript($conversation),
             'tokens'          => $conversation->getTotalTokens(),
+            'provider'        => $conversation->getProvider(),
+            'model'           => $conversation->getModel(),
         ]);
     }
 
@@ -161,7 +201,7 @@ class WittyController extends CommonController
     }
 
     /**
-     * @return array{0: string, 1: int|null}|null
+     * @return array{0: string, 1: int|null, 2: string|null, 3: string|null}|null
      */
     private function decode(Request $request): ?array
     {
@@ -181,6 +221,9 @@ class WittyController extends CommonController
             ? (int) $payload['conversation_id']
             : null;
 
-        return [$message, $conversationId];
+        $provider = trim((string) ($payload['provider'] ?? ''));
+        $model    = trim((string) ($payload['model'] ?? ''));
+
+        return [$message, $conversationId, '' !== $provider ? $provider : null, '' !== $model ? $model : null];
     }
 }

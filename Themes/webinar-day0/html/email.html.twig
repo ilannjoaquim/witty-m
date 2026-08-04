@@ -1,0 +1,496 @@
+{#
+  Webinar Day 0 -- theme Witty
+  Ce fichier est du MJML : GrapesJsController bascule en mode MJML des qu'il
+  trouve <mjml> dans le rendu (email.mjml.twig est marque deprecie dans le
+  code de Mautic).
+
+  Attention en editant : ce fichier passe par Twig. Une double accolade y
+  serait interpretee comme une variable Twig. Ce theme n'en a aucune : les
+  emplacements sont ecrits [ENTRE CROCHETS], a remplacer dans le builder.
+  Les tokens Mautic ({contactfield=...}, {webview_url}) n'ont qu'une
+  accolade et traversent Twig sans dommage.
+#}
+<mjml>
+  <!--
+  ==========================================================================
+  WEBINAR TEMPLATE — DAY 0 (ANNOUNCEMENT)
+  The first email that introduces the webinar. Works for any niche or topic.
+  ==========================================================================
+
+  HOW DAY 0 IS DIFFERENT FROM A REMINDER EMAIL
+  A reminder email sells the DEADLINE ("last chance, tomorrow at 10:30").
+  Day 0 has no deadline yet — nobody is waiting for this email. So it has to
+  sell the PROBLEM instead. The reader doesn't wake up wanting a webinar;
+  they wake up with a frustration. Your job here is to name that frustration
+  more precisely than they could themselves, then position the webinar as
+  the obvious next step.
+  Practical consequences:
+    • Longer body copy than a reminder. Day 0 is where you earn attention.
+    • Only 2 CTAs, not 3. Pushing hard on a first touch reads as desperate.
+    • No fake scarcity. Save real urgency for emails 2 and 3 — if you burn
+      "last chance" on day 0, the sequence has nowhere left to go.
+    • The goal is recognition, not pressure. The reader should think
+      "this is literally my situation" before they see a single button.
+
+  SIX RULES BEFORE YOU WRITE
+  1. ONE goal: the click to the registration page. No links to your blog,
+     socials, or homepage. Every extra link splits your click-through rate.
+  2. ONE destination: both buttons point to the SAME URL. Only the wording
+     changes.
+  3. Write to ONE person. "You", never "you all". It should read like an
+     email written for them, not broadcast at them.
+  4. Sell the REGISTRATION, not the webinar. This email earns the click;
+     the landing page does the selling.
+  5. Benefits over topics. Not "we'll cover X", but "you'll leave able to
+     do Y in Z minutes".
+  6. Keep at least 60% real text. Image-heavy emails hit spam filters and
+     show up blank for the ~40% of opens with images off.
+
+  HOW TO USE THIS FILE
+  - Every block has a [PLACEHOLDER] plus a WHY / HOW comment above it.
+  - Never reorder the sections: they follow the reading path
+    (attention → recognition → problem → cost → answer → proof → action).
+  - Before sending, Ctrl+F for "[" — if anything is left, you're not done.
+  ==========================================================================
+  -->
+
+  <mj-head>
+    <mj-style>
+      @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700;800&amp;family=Inter:wght@300;400;500;600;700&amp;display=swap');
+      .hook { font-family: 'Poppins', sans-serif; font-size: 20px; font-weight: 700; line-height: 1.4; color: #000000; }
+      .h1 { font-family: 'Poppins', sans-serif; font-size: 29px; font-weight: 700; line-height: 1.28; letter-spacing: -0.7px; color: #000000; }
+      .h2 { font-family: 'Poppins', sans-serif; font-size: 24px; font-weight: 700; line-height: 1.3; letter-spacing: -0.5px; color: #000000; }
+      .eyebrow { font-family: 'Poppins', sans-serif; font-size: 13px; font-weight: 600; letter-spacing: 1.2px; text-transform: uppercase; color: #999999; }
+      .lead { font-size: 17px; font-weight: 300; line-height: 1.6; color: #000000; }
+      .meta { font-size: 14px; font-weight: 500; color: #666666; }
+      .micro { font-size: 12px; font-weight: 400; color: #999999; }
+      .quote { font-style: italic; font-weight: 300; line-height: 1.7; color: #000000; }
+      .strong { font-weight: 600; }
+      a { color: #000000; text-decoration: underline; }
+      @media only screen and (max-width:480px) {
+        .h1 { font-size: 24px !important; letter-spacing: -0.4px !important; }
+        .hook { font-size: 17px !important; }
+        .h2 { font-size: 21px !important; }
+        .lead { font-size: 16px !important; }
+      }
+    </mj-style>
+  </mj-head>
+
+  <mj-body width="640px" background-color="#ffffff">
+
+    <!-- ====================================================================
+    1. LOGO
+    WHY: sender recognition in under half a second. A reader who identifies
+    the brand before reading drops their guard. A clean logo on white also
+    signals "legitimate business email" to spam filters.
+    HOW: 160-200px wide, transparent PNG, hosted on your own domain (never
+    Drive or Dropbox — those links break). Always fill in the alt text.
+    ==================================================================== -->
+    <mj-section padding="36px 24px 28px">
+      <mj-column>
+        <mj-image src="http://mautic.digitalrocket.pt/media/images/logo-digitalrocket.png" width="180px" alt="[Brand name]" fluid-on-mobile="true" />
+      </mj-column>
+    </mj-section>
+
+    <mj-section>
+      <mj-column>
+        <mj-divider />
+      </mj-column>
+    </mj-section>
+
+    <!-- ====================================================================
+    2. HERO VISUAL (GIF or image)
+    WHY: the brain reads an image far faster than a sentence. This visual is
+    not decoration — it announces the SUBJECT or the FORMAT (the host's face,
+    a screen from the method, a peek at what they'll build). On day 0 a face
+    outperforms an abstract graphic: people register for people.
+    HOW: 600px wide, 16:9 (600×338). GIF under 1 MB, JPG under 200 KB.
+    Descriptive alt text is mandatory — if images are blocked, the alt still
+    has to sell. Avoid text baked into the image: unreadable on mobile and
+    penalised by filters.
+    ==================================================================== -->
+    <mj-section padding="28px 24px">
+      <mj-column>
+        <mj-image src="https://via.placeholder.com/600x338/000000/ffffff?text=HERO+600x338" width="600px" alt="[Describe the visual: what the reader will see or learn]" fluid-on-mobile="true" />
+      </mj-column>
+    </mj-section>
+
+    <!-- ====================================================================
+    3. TITLE BLOCK — THE PROMISE
+    Assume 80% of readers will only read this block. It has five parts, in
+    this exact order. Don't skip any of them.
+    ==================================================================== -->
+    <mj-section padding="16px 24px 0px">
+      <mj-column>
+
+        <!--
+        3a. HOOK LINE (day-0 specific)
+        WHY: this is the line a reminder email doesn't need. It buys the two
+        seconds you need to earn the headline. It works by pattern
+        interruption: a truth the reader agrees with instantly, followed by
+        an unexpected turn.
+        HOW: two short lines separated by <br>, 4-9 words each.
+          Line 1 = a statement they nod at.
+          Line 2 = the twist that makes it your subject.
+        Formats that work:
+          • Familiar truth + reversal — "Everyone wants X. / Almost nobody does Y."
+          • Insider observation      — "[Audience] love [X]. / So does [gatekeeper]."
+          • Contradiction            — "You're doing everything right. / It's still not working."
+        Cultural or local references land hard here — but only if you share
+        that culture with the reader. Never fake it.
+        -->
+        <mj-text css-class="hook" align="center" padding-bottom="18px">
+          [HOOK — 2 short lines. Line 1: something they instantly agree with.<br />Line 2: the twist that opens your topic.]
+        </mj-text>
+
+        <!--
+        3b. HEADLINE
+        WHY: it names the transformation. Day 0 has no deadline to lean on,
+        so the headline has to carry the value on its own.
+        HOW: 6 to 14 words. Pick ONE angle:
+          • Outcome  — "[Result] in [timeframe], without [pain]"
+          • Gap      — "What [audience] gets wrong about [topic] in [year]"
+          • Method   — "[Topic A], [B] & [C]: the method that [outcome]"
+        Be specific. A number always beats an adjective, and a concrete noun
+        always beats a category.
+        BANNED: "Join our webinar", "Newsletter #12", "Don't miss out" —
+        zero tension, zero clicks.
+        -->
+        <mj-text css-class="h1" align="center" padding-bottom="16px">
+          [HEADLINE — 6 to 14 words naming the transformation. Ex. "[Topic]: how to [outcome] in [year]"]
+        </mj-text>
+
+        <!--
+        3c. SUBHEADLINE — THE QUALIFIER
+        WHY: the headline makes the claim, the subheadline makes it credible
+        and filters the audience. It answers "what do I actually walk away
+        with?".
+        HOW: one line, 6-14 words. Add the measurable part the headline
+        couldn't fit: "that actually generate qualified leads in [year]",
+        "even if you're a team of one".
+        -->
+        <mj-text css-class="lead" align="center" padding-bottom="14px">
+          [SUBHEADLINE — 1 line, the concrete measurable result. Ex. "That actually turn into qualified leads"]
+        </mj-text>
+
+        <!--
+        3d. SOCIAL PROOF
+        WHY: conformity bias. "Already taken by 2,600 marketers" removes
+        perceived risk faster than any argument you could write. On day 0
+        it's also your only credibility signal — the reader has no reason to
+        trust you yet.
+        HOW: one REAL number, in this order of strength:
+        past attendees > clients served > average rating > a recognisable
+        client name. No number yet? Use experience ("12 years doing [X]")
+        or delete the block. Never invent one.
+        -->
+        <mj-text css-class="meta" align="center" padding-bottom="18px">
+          [SOCIAL PROOF — one verifiable number. Ex. "Already attended by 2,600+ [audience]"]
+        </mj-text>
+
+        <!--
+        3e. COST OF ENTRY
+        WHY: the reader is unconsciously pricing this in time. Stating
+        "1 min read" removes that objection before it forms.
+        HOW: be honest — roughly 200 words per minute. Day 0 runs longer than
+        a reminder, so 1-2 min is normal. You can also stack it:
+        "(1 min read — 45 min live)".
+        -->
+        <mj-text css-class="micro" align="center">
+          [COST OF ENTRY — ex. "(reading time: 1 min)"]
+        </mj-text>
+      </mj-column>
+    </mj-section>
+
+    <!-- ====================================================================
+    4. CTA #1 — FOR READERS ALREADY SOLD
+    WHY: roughly 15% of readers are ready the moment they've read the
+    promise. Forcing them through 400 more words loses them. This early
+    button captures them at no cost to everyone else.
+    HOW: the line above states WHEN — on day 0 this is information, not
+    pressure, so keep it factual (day, date, time). The button label is
+    written in the FIRST PERSON ("Save my seat"): the reader reads their own
+    commitment, which measurably lifts clicks. Action verb + benefit. Never
+    "Click here" or "Learn more" — no promise, no click.
+    ==================================================================== -->
+    <mj-section padding="36px 24px 0px">
+      <mj-column>
+        <mj-text align="center" font-family="'Poppins', sans-serif" font-size="17px" font-weight="700" color="#000000" padding-bottom="18px">
+          [DATE LINE — ex. "🟢 WEBINAR | Thursday, [date] at [time]"]
+        </mj-text>
+        <mj-button href="[REGISTRATION_URL]">
+          [CTA 1 — 2 to 5 words, first person. Ex. "Save my seat"]
+        </mj-button>
+      </mj-column>
+    </mj-section>
+
+    <mj-section padding="36px 24px 0px">
+      <mj-column>
+        <mj-divider />
+      </mj-column>
+    </mj-section>
+
+    <!-- ====================================================================
+    5. BODY — THE P.A.S. STRUCTURE
+    Problem → Agitation → Solution. Name the pain before offering the cure.
+    A reader who recognises themselves in your description of the problem
+    grants you authority on the solution — this is the single highest-
+    leverage part of a day-0 email.
+    RULE: one idea per paragraph, two lines maximum. Dense blocks kill
+    mobile reading. White space isn't emptiness, it's pacing.
+    ==================================================================== -->
+    <mj-section padding="36px 24px 0px">
+      <mj-column>
+
+        <!--
+        5a. PERSONALISED GREETING
+        WHY: the cocktail-party effect — a first name grabs attention
+        involuntarily. Typically worth 15-25% more engagement.
+        HOW: ALWAYS use a fallback with the pipe, or contacts with no first
+        name get "Hi ,". Mautic syntax: {contactfield=firstname|there}
+        Also: no space before the comma. It's a small thing that instantly
+        reads as automated.
+        -->
+        <mj-text font-weight="400" padding-bottom="20px">
+          Hi <span class="atwho-inserted" data-fr-verified="true">{contactfield=firstname|there}</span>,
+        </mj-text>
+
+        <!--
+        5b. THE SITUATION — where the reader lives
+        WHY: open in their world, not yours. The first sentence has one job:
+        make them think "that's me". Describe the constraint they operate
+        under, not the topic you want to teach.
+        HOW: 1-2 short paragraphs. Name the specific circumstance — the small
+        team, the missing budget, the ten hats they wear. Specificity is what
+        makes it feel personal at scale.
+        BANNED: "We're excited to invite you to…" — that's about you, and
+        that's where they stop reading.
+        -->
+        <mj-text padding-bottom="14px">
+          [SITUATION — 1 sentence describing the reader's constraint. Ex. "When you're the only one handling [X], [topic] turns into a puzzle."]
+        </mj-text>
+        <mj-text padding-bottom="20px">
+          [WHY NOW — 1 sentence on what changed recently and made it worse. Ex. "Especially since [change] took over in [year]."]
+        </mj-text>
+
+        <!--
+        5c. THE PROBLEM — named out loud
+        WHY: this sentence gives them permission to be confused. Telling them
+        the confusion is widespread and justified removes shame, and a reader
+        who isn't defensive keeps reading.
+        HOW: one sentence, slightly heavier weight so it stands out when
+        scanned. Add the absolving clause — "and for good reason", "it's not
+        their fault".
+        -->
+        <mj-text font-weight="400" padding-bottom="20px">
+          [PROBLEM — 1 sentence. Ex. "The truth? Most [audience] are lost on this — and for good reason."]
+        </mj-text>
+
+        <!--
+        5d. VERBATIM QUOTES — the identification device
+        WHY: this is the most powerful block in a day-0 email and the one
+        most people skip. Quoting your audience's exact words does something
+        no polished copy can: it proves you've had this conversation before.
+        The reader recognises their own internal monologue, and recognition
+        converts better than persuasion.
+        HOW: 2 quotes, 1-2 lines each. Pull them from real sources — sales
+        calls, support tickets, DMs, discovery questionnaires, comments.
+        Keep the messy, spoken phrasing, including the hesitations. Do NOT
+        write them yourself in clean marketing English; it's obvious and it
+        destroys the effect.
+          Quote 1 → the confusion ("everyone talks about X, but what do I
+                    actually DO?")
+          Quote 2 → the paralysis ("I don't know what to prioritise anymore")
+        -->
+        <mj-text css-class="quote" padding-bottom="20px">
+          <p style="margin:0 0 10px 0;">💬 "[QUOTE 1 — their real words about the confusion. Keep it messy and spoken.]"</p>
+          <p style="margin:0;">💬 "[QUOTE 2 — their real words about not knowing what to prioritise.]"</p>
+        </mj-text>
+
+        <!--
+        5e. AGITATION — the cost of doing nothing
+        WHY: loss aversion is about twice as motivating as the prospect of
+        gain. Naming what inaction costs is what turns a nodding reader into
+        a clicking one.
+        HOW: two short paragraphs. First the immediate consequence (guessing,
+        wasted effort, no way to tell if it's working). Then the slow one —
+        the thing that quietly gets deprioritised, month after month, until
+        it's a real gap. Stay factual: exaggerated fear reads as manipulation
+        and triggers the unsubscribe, not the click.
+        -->
+        <mj-text font-weight="400" padding-bottom="12px">
+          [IMMEDIATE COST — 1 sentence. Ex. "So you keep moving in the dark, with no real way to know if any of it works."]
+        </mj-text>
+        <mj-text font-weight="400" padding-bottom="20px">
+          [SLOW COST — 1 sentence on what keeps getting pushed back behind other priorities. 🫣]
+        </mj-text>
+
+        <!--
+        5f. THE PIVOT
+        WHY: one short line that hands the reader the exit. After the
+        negative stretch, it reframes you as the person who already solved
+        this. Short is the point — momentum matters more than eloquence.
+        HOW: max 8 words. "That's exactly what we help you fix."
+        -->
+        <mj-text>
+          [PIVOT — 1 short line. Ex. "That's exactly what we help you fix."]
+        </mj-text>
+      </mj-column>
+    </mj-section>
+
+    <mj-section padding="36px 24px 0px">
+      <mj-column>
+        <mj-divider />
+      </mj-column>
+    </mj-section>
+
+    <!-- ====================================================================
+    6. WEBINAR DETAILS — THE PROOF IT'S REAL
+    WHY: the body sold the problem; this block proves the answer exists and
+    is concrete. It's also the block scanners jump to, so it has to work on
+    its own: label, name, date, topic, agenda. Anyone landing here cold
+    should understand what they're signing up for in five seconds.
+    ==================================================================== -->
+    <mj-section padding="36px 24px 0px">
+      <mj-column>
+
+        <!--
+        6a. EYEBROW LABEL
+        WHY: a structural signpost. It tells the eye "the practical
+        information starts here" — that's the whole job. Keep it plain.
+        -->
+        <mj-text css-class="eyebrow" padding-bottom="8px">
+          Webinar details
+        </mj-text>
+
+        <!--
+        6b. SESSION NAME
+        WHY: naming it makes it an event rather than a link. "Webinar #1"
+        also implies a series, which frames you as someone who does this
+        regularly — a small but real credibility cue on a first touch.
+        HOW: keep it short and repeat the exact same name on the landing
+        page. A mismatch between email and LP causes drop-off at the worst
+        possible moment.
+        -->
+        <mj-text css-class="h2" padding-bottom="8px">
+          [SESSION NAME — ex. "🤖 Webinar #1"]
+        </mj-text>
+
+        <!--
+        6c. DATE & TIME
+        WHY: pure logistics, and the #1 reason people don't register is
+        "I don't know if I'm free".
+        HOW: day + date + time. Add the time zone if your list spans more
+        than one. Re-check this EVERY time you reuse the template — a wrong
+        date is the fastest way to lose trust.
+        -->
+        <mj-text css-class="meta" padding-bottom="24px">
+          [DAY, DATE at TIME + time zone if needed]
+        </mj-text>
+
+        <!--
+        6d. TOPIC LINE
+        WHY: the one-sentence version of the whole email, for the person who
+        scrolled straight here. It should be able to stand completely alone.
+        HOW: "Topic:" in bold + the transformation, not the subject matter.
+        -->
+        <mj-text font-weight="600" line-height="1.7" padding-bottom="24px">
+          <strong>Topic:</strong> [The transformation in one line — ex. "[method] that [outcome] in [year]"]
+        </mj-text>
+
+        <!--
+        6e. AGENDA — three bullets, no more
+        WHY: three is not decorative. Two feels thin, five or more dilutes
+        and stops being memorable. Each bullet should kill an objection or
+        promise an outcome — never announce a topic.
+        HOW: recommended order, weakest to most desirable:
+          Bullet 1 → the ingredients / what a working version looks like
+          Bullet 2 → the speed or effort objection removed ("in under an
+                     hour, without sacrificing quality")
+          Bullet 3 → your signature method, named. Best one last: it's the
+                     line they remember when they decide.
+        Bold the 3-5 words that carry the value in each bullet — most people
+        read bullets by their bold parts only.
+        ❌ "Introduction to the topic"  →  ✅ "Why 80% of [X] stall out"
+        -->
+        <mj-text font-family="'Poppins', sans-serif" font-size="14px" font-weight="600" padding-bottom="14px">
+          📌 Agenda:
+        </mj-text>
+        <mj-text line-height="1.85">
+          <ul style="margin:0 0 0 18px;padding:0;list-style:none;">
+            <li style="margin-bottom:12px;">[BULLET 1 — the ingredients of <span class="strong">a method that actually works in [year]</span>]</li>
+            <li style="margin-bottom:12px;">[BULLET 2 — the effort objection removed: <span class="strong">"[outcome] in under [time]"</span>, without [trade-off]]</li>
+            <li>[BULLET 3 — <span class="strong">your named signature method</span>, the most desirable one, last]</li>
+          </ul>
+        </mj-text>
+      </mj-column>
+    </mj-section>
+
+    <!-- ====================================================================
+    7. CTA #2 — THE CLOSE
+    WHY: peak intent. They've just read exactly what they get. Don't make
+    them scroll back up to find a button.
+    HOW: same URL, slightly different wording from CTA 1 — variation avoids
+    the copy-paste feel and lets you see which phrasing pulls. On day 0,
+    stop here: two CTAs is right for a first touch. Add the third one in the
+    reminder emails, where real urgency justifies it.
+    ==================================================================== -->
+    <mj-section padding="32px 24px 40px">
+      <mj-column>
+        <mj-button href="[REGISTRATION_URL]">
+          [CTA 2 — variation on CTA 1. Ex. "Save my spot now 🔥"]
+        </mj-button>
+      </mj-column>
+    </mj-section>
+
+    <mj-section>
+      <mj-column>
+        <mj-divider />
+      </mj-column>
+    </mj-section>
+
+    <!-- ====================================================================
+    8. FOOTER — LEGAL AND DELIVERABILITY
+    WHY: the postal address and unsubscribe link are legally required
+    (GDPR / CAN-SPAM) and actively monitored by Gmail and Outlook. An easy
+    unsubscribe is far better than a spam complaint: one complaint damages
+    your sending reputation roughly a hundred times more than one opt-out.
+    HOW: never touch the {webview_url} and {unsubscribe_url} tokens. Keep
+    this block quiet — small and grey — but never hidden.
+    ==================================================================== -->
+    <mj-section padding="32px 24px 40px">
+      <mj-column>
+        <mj-text align="center" font-family="'Poppins', sans-serif" font-size="15px" font-weight="600" padding-bottom="8px">
+          [BRAND NAME]
+        </mj-text>
+        <mj-text align="center" css-class="meta" padding-bottom="18px">
+          [Full postal address — legally required]
+        </mj-text>
+        <mj-text align="center" css-class="micro" padding-bottom="14px">
+          This email was sent to <span class="atwho-inserted" data-fr-verified="true">{contactfield=email}</span>
+        </mj-text>
+        <mj-text align="center" font-size="12px">
+          <a href="{webview_url}" style="color:#000000;text-decoration:underline;">View in browser</a> &nbsp;|&nbsp;
+          <a href="{unsubscribe_url}" style="color:#000000;text-decoration:underline;">Unsubscribe</a>
+        </mj-text>
+      </mj-column>
+    </mj-section>
+
+    <!--
+    ==========================================================================
+    PRE-SEND CHECKLIST (this block is a comment — leave it or delete it)
+    □ Both buttons point to the same URL, with UTM parameters.
+    □ Day, date and time match across subject, body and landing page.
+    □ Every [BRACKET] replaced — run Ctrl+F on "[".
+    □ The two quotes are REAL quotes from real people, not invented.
+    □ {contactfield=firstname|there} tested on a contact with no first name.
+    □ Test send opened on mobile with images off: still readable, CTA still
+      visible.
+    □ Alt text filled in on every image.
+    □ Subject line under 45 characters, preheader extends it.
+    □ No urgency language you'll need again in the reminder emails.
+    ==========================================================================
+    -->
+
+  </mj-body>
+</mjml>

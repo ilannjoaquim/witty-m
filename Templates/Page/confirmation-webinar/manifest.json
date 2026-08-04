@@ -1,0 +1,219 @@
+{
+    "key": "confirmation-webinar",
+    "name": "Webinar Confirmation Page",
+    "description": "The page a registrant lands on right after submitting the form. It rewrites itself based on the current time: countdown before the event, one join button during it, a replay message after. This page optimises ATTENDANCE, not registrations -- typical webinar no-show rates sit between 40% and 65%, and everything here exists to protect the registration you already paid to acquire.",
+    "language": "en",
+    "goal": "Confirm the registration, get the event into the visitor's calendar with a reminder before they close the tab, and keep the same URL working as the join button on the day and the replay pointer afterwards.",
+    "rules": [
+        "This must be created as raw code, not through a visual builder: it is injected as customHtml with template=mautic_code_mode, never rendered through GrapesJS. The page's countdown, calendar buttons and live/ended state switching all run on inline JavaScript, and a drag-and-drop builder does not reliably preserve a <script> block across saves.",
+        "Write all three header states (before, live, ended) now. Coming back to write the ended copy on the day of the event is how pages end up saying 'your seat is confirmed' three hours after it finished.",
+        "The event date, timezone and duration must exactly match the confirmation email and the landing page. A mismatch reads as a mistake, not a detail.",
+        "Never run a countdown to a deadline that is not real. Fake urgency is detectable and costs trust across every future campaign.",
+        "This page is a destination, not a receipt: tell people to bookmark it, and put its URL in every reminder email, so latecomers who lost the join email still have a way in."
+    ],
+    "placeholders": [
+        {
+            "key": "LANG",
+            "label": "Page language",
+            "guidance": "HTML lang attribute.",
+            "default": "en"
+        },
+        {
+            "key": "PAGE_TITLE",
+            "label": "Browser tab title",
+            "guidance": "Shown in the browser tab, not on the page itself. Keep it recognisable: confirmation phrase plus the webinar name.",
+            "example": "Registration confirmed -- Product Launch Livestream"
+        },
+        {
+            "key": "EVENT_TITLE",
+            "label": "Event name (calendar)",
+            "guidance": "Appears in the calendar invite title. Include the topic, not just 'Webinar' -- this is the only line most people will see in a crowded calendar three weeks from now.",
+            "context": "js",
+            "example": "Product Launch Livestream: What's New in 2026"
+        },
+        {
+            "key": "START_DATE",
+            "label": "Start date/time",
+            "guidance": "ISO 8601 with the UTC offset at the end, e.g. 2026-11-12T09:30:00+00:00. The offset is not decorative: it is what makes the countdown correct for a visitor in another timezone. Daylight saving changes the offset twice a year -- use the offset for the actual event date, not for today.",
+            "context": "js",
+            "example": "2026-11-12T09:30:00+00:00"
+        },
+        {
+            "key": "TIME_ZONE",
+            "label": "Event timezone",
+            "guidance": "IANA timezone name, used to display the date in the EVENT's timezone rather than the visitor's, so it matches what the emails say. Ex: Europe/Lisbon, Europe/Paris, America/New_York.",
+            "context": "js",
+            "example": "Europe/Paris"
+        },
+        {
+            "key": "LOCALE",
+            "label": "Date display locale",
+            "guidance": "Locale for the displayed date, e.g. en-US, en-GB, fr-FR, pt-PT.",
+            "context": "js",
+            "default": "en-US"
+        },
+        {
+            "key": "DURATION_MINUTES",
+            "label": "Duration (minutes)",
+            "guidance": "Plain integer. Sets the calendar invite's end time and when the page flips from live to ended -- add 15 to 20 minutes of Q&A buffer, or the join button disappears while still on air.",
+            "context": "js",
+            "default": "90"
+        },
+        {
+            "key": "JOIN_LINK",
+            "label": "Join link",
+            "guidance": "The Meet/Zoom/Teams/room URL. Visible in the page source from the moment the page is live -- if the session must stay private, use a per-registrant token rather than hardcoding a shared link.",
+            "context": "js"
+        },
+        {
+            "key": "EVENT_DESCRIPTION",
+            "label": "Calendar invite description",
+            "guidance": "The most under-used field on the page: it sits inside the registrant's calendar for weeks and is what they reread right before deciding whether to show up. Include the join link and repeat the live-only bonus.",
+            "context": "js",
+            "example": "Live only: the Q&A and the template pack. Join link: https://meet.example.com/launch"
+        },
+        {
+            "key": "EVENT_LOCATION",
+            "label": "Calendar invite location",
+            "guidance": "Location field of the invite. 'Online' plus the event name is enough.",
+            "context": "js",
+            "example": "Online -- Product Launch Livestream"
+        },
+        {
+            "key": "ICS_FILENAME",
+            "label": ".ics filename",
+            "guidance": "Lowercase, no spaces, no extension (added automatically).",
+            "context": "js",
+            "example": "product-launch-livestream"
+        },
+        {
+            "key": "CONFIRMED_EYEBROW",
+            "label": "\"Before\" state -- eyebrow",
+            "guidance": "Confirms the registration went through.",
+            "default": "Registration confirmed"
+        },
+        {
+            "key": "CONFIRMED_HEADLINE",
+            "label": "\"Before\" state -- headline",
+            "guidance": "3 to 5 words, ownership language ('your seat'), can span two lines with <br>. Ownership triggers the endowment effect: something you own is something you do not want to lose.",
+            "example": "Your seat is<br>secured.",
+            "context": "html_br"
+        },
+        {
+            "key": "CONFIRMED_SUBTITLE",
+            "label": "\"Before\" state -- subtitle",
+            "guidance": "Tell them to expect a confirmation email (so it does not read as spam), and plant the live-only bonus -- the reason to attend rather than wait for the replay.",
+            "example": "Check your inbox for the confirmation email. Save the date -- the live Q&A and the template pack are for attendees only."
+        },
+        {
+            "key": "LIVE_EYEBROW",
+            "label": "\"Live\" state -- eyebrow",
+            "default": "Live now"
+        },
+        {
+            "key": "LIVE_HEADLINE",
+            "label": "\"Live\" state -- headline",
+            "guidance": "States the fact: it has started. The reader is possibly on their phone, possibly late, definitely not reading -- every word that isn't 'get in now' is in the way.",
+            "example": "The webinar has<br>started.",
+            "context": "html_br"
+        },
+        {
+            "key": "LIVE_SUBTITLE",
+            "label": "\"Live\" state -- subtitle",
+            "guidance": "One reason to move immediately. Mentioning the bonus here converts 'I'll catch the replay' back into 'I should join now'.",
+            "example": "Join now -- the live Q&A and the template pack are only for people in the room."
+        },
+        {
+            "key": "ENDED_EYEBROW",
+            "label": "\"Ended\" state -- eyebrow",
+            "default": "This session has ended"
+        },
+        {
+            "key": "ENDED_HEADLINE",
+            "label": "\"Ended\" state -- headline",
+            "guidance": "This state runs the longest of the three -- it will sit here for months, collecting traffic from every old email and shared link.",
+            "example": "That's a wrap<br>for today.",
+            "context": "html_br"
+        },
+        {
+            "key": "ENDED_SUBTITLE",
+            "label": "\"Ended\" state -- subtitle",
+            "guidance": "Thank them and set a concrete timeframe for the recording ('in the next few hours', 'tomorrow morning'). If you promise the replay here, send the replay -- this page makes a promise you keep weeks later, when nobody is watching.",
+            "example": "Thanks for joining. The replay lands in your inbox within 24 hours."
+        },
+        {
+            "key": "COUNTDOWN_LABEL",
+            "default": "The webinar starts in"
+        },
+        {
+            "key": "DAYS_LABEL",
+            "default": "Days"
+        },
+        {
+            "key": "HOURS_LABEL",
+            "default": "Hours"
+        },
+        {
+            "key": "MINUTES_LABEL",
+            "default": "Minutes"
+        },
+        {
+            "key": "SECONDS_LABEL",
+            "default": "Seconds"
+        },
+        {
+            "key": "LIVE_BADGE_LABEL",
+            "default": "Live now"
+        },
+        {
+            "key": "GCAL_BUTTON_LABEL",
+            "default": "Add to Google Calendar"
+        },
+        {
+            "key": "ICS_BUTTON_LABEL",
+            "default": "Download .ics (Apple / Outlook)"
+        },
+        {
+            "key": "BEFORE_HINT",
+            "label": "Hint under the calendar buttons",
+            "guidance": "Two things only: the access link arrives by email, and they can bookmark this page to join from here later.",
+            "example": "The join link is in your confirmation email. You can also bookmark this page -- it becomes your way in on the day."
+        },
+        {
+            "key": "JOIN_BUTTON_LABEL",
+            "default": "Join the webinar"
+        },
+        {
+            "key": "LIVE_HINT",
+            "label": "Hint under the live button",
+            "guidance": "The last nudge for anyone hesitating because they think they're already late. Reassure them it's worth joining anyway.",
+            "example": "It just started -- the live Q&A and the bonus are worth jumping in for."
+        },
+        {
+            "key": "ENDED_HINT",
+            "label": "Hint under the ended state",
+            "example": "Keep an eye on your inbox over the next few hours."
+        },
+        {
+            "key": "BRAND_NAME",
+            "label": "Brand name (footer)"
+        },
+        {
+            "key": "COPYRIGHT_YEAR",
+            "label": "Copyright year",
+            "guidance": "Use the current year."
+        },
+        {
+            "key": "RIGHTS_STATEMENT",
+            "default": "All rights reserved."
+        },
+        {
+            "key": "PRIVACY_URL",
+            "label": "Privacy policy URL"
+        },
+        {
+            "key": "TERMS_URL",
+            "label": "Terms of service URL"
+        }
+    ]
+}

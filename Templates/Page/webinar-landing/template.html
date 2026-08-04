@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="{{LANG}}">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<title>{{PAGE_TITLE}}</title>
+<meta name="description" content="{{META_DESCRIPTION}}">
+
+<!-- Social share card: without these, a link posted in Slack/LinkedIn/WhatsApp
+     shows up as a naked URL and gets ignored. Image must be 1200x630px. -->
+<meta property="og:title" content="{{OG_TITLE}}">
+<meta property="og:description" content="{{OG_DESCRIPTION}}">
+<meta property="og:image" content="{{OG_IMAGE_URL}}">
+<meta property="og:type" content="website">
+
+<link href="https://fonts.googleapis.com/css2?family=Poppins:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;0,900;1,300&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+
+<style>
+  :root {
+    --ink:        #0a0a0a;
+    --ink-deep:   #080808;
+    --body:       #3a3a3a;
+    --muted:      #666666;
+    --paper:      #f5f4f0;
+    --card:       #ffffff;
+    --line:       #e0ddd6;
+    --line-soft:  #e8e6e0;
+    --accent:     #FF3D2E;
+    --accent-dk:  #e0321f;
+
+    --s1: 8px;   --s2: 12px;  --s3: 16px;  --s4: 20px;
+    --s5: 24px;  --s6: 32px;  --s7: 40px;  --s8: 56px;  --s9: 80px;
+
+    --block: var(--s8);
+    --radius: 4px;
+  }
+
+  *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+  html { scroll-behavior:smooth; overflow-x:clip; width:100%; }
+  body { overflow-x:clip; width:100%; }
+  img { max-width:100%; height:auto; display:block; }
+
+  body {
+    font-family:'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    line-height:1.6;
+    color:var(--ink);
+    background:var(--paper);
+    min-height:100vh;
+  }
+
+  a:focus-visible, button:focus-visible, input:focus-visible,
+  select:focus-visible, textarea:focus-visible {
+    outline:2px solid var(--accent);
+    outline-offset:2px;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation:none !important; transition:none !important; }
+    html { scroll-behavior:auto; }
+  }
+
+  .mobile-topbar {
+    display:none;
+    background:var(--ink);
+    border-bottom:1px solid #1f1f1f;
+    padding:10px 18px;
+    align-items:center;
+    justify-content:space-between;
+    position:sticky; top:0; z-index:99;
+  }
+  .mobile-topbar-text { color:rgba(255,255,255,0.55); font-size:12px; letter-spacing:0.4px; }
+  .mobile-topbar-btn {
+    background:var(--accent); color:#fff; text-decoration:none;
+    padding:8px 18px; font-size:11px; font-weight:700;
+    letter-spacing:1.2px; text-transform:uppercase;
+    font-family:'Poppins', sans-serif; white-space:nowrap;
+    border-radius:2px; transition:opacity 0.15s;
+  }
+  .mobile-topbar-btn:hover { opacity:0.85; }
+  @media (max-width:1100px) { .mobile-topbar { display:flex; } }
+
+  .hero {
+    background:var(--ink-deep); color:#fff;
+    padding:var(--s9) var(--s5) 100px;
+    text-align:center; position:relative; overflow:hidden;
+  }
+  .hero::before {
+    content:''; position:absolute; inset:0; pointer-events:none;
+    background:
+      radial-gradient(ellipse 80% 60% at 50% 110%, rgba(255,61,46,0.28) 0%, transparent 65%),
+      radial-gradient(ellipse 50% 40% at 80% 20%, rgba(255,100,30,0.10) 0%, transparent 60%);
+  }
+  .hero-noise {
+    position:absolute; inset:0; opacity:0.03; pointer-events:none;
+    background-image:url("data:image/svg+xml,<svg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+    background-size:200px;
+  }
+  .hero-content { max-width:860px; margin:0 auto; position:relative; z-index:1; }
+  .hero-eyebrow {
+    display:inline-flex; align-items:center; gap:var(--s1);
+    font-size:11px; letter-spacing:2.5px; text-transform:uppercase;
+    color:rgba(255,255,255,0.45); font-weight:500;
+    margin-bottom:var(--s6); font-family:'Poppins', sans-serif;
+    position:relative; z-index:1;
+  }
+  .eyebrow-dot {
+    width:6px; height:6px; border-radius:50%;
+    background:var(--accent); display:inline-block;
+    animation:pulse 2s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%,100% { opacity:1; transform:scale(1); }
+    50% { opacity:0.5; transform:scale(0.7); }
+  }
+  .hero-logo {
+    height:52px; width:auto; margin:0 auto var(--s7);
+    position:relative; z-index:1; opacity:0.92;
+  }
+  .hero h1 {
+    font-family:'Poppins', sans-serif; font-size:80px; font-weight:900;
+    line-height:1.0; letter-spacing:-3px; margin-bottom:var(--s6); color:#fff;
+  }
+  .hero h1 em {
+    font-style:italic; font-weight:300; letter-spacing:-2px;
+    background:linear-gradient(110deg, #FF8C60 10%, var(--accent) 60%);
+    -webkit-background-clip:text; background-clip:text;
+    -webkit-text-fill-color:transparent;
+  }
+  .hero-sub {
+    font-size:19px; color:rgba(255,255,255,0.55); font-weight:300;
+    max-width:500px; margin:0 auto var(--s7); line-height:1.65;
+  }
+  .hero-date {
+    display:inline-block; border:1px solid rgba(255,255,255,0.15);
+    background:rgba(255,255,255,0.04); padding:var(--s2) 28px;
+    border-radius:2px; backdrop-filter:blur(4px);
+  }
+  .hero-date p {
+    font-size:11px; font-weight:600; color:rgba(255,255,255,0.6);
+    letter-spacing:2px; text-transform:uppercase;
+    font-family:'Poppins', sans-serif; margin:0;
+  }
+  .hero-scroll-indicator {
+    position:absolute; bottom:var(--s5); left:50%;
+    transform:translateX(-50%); z-index:1;
+  }
+  .hero-scroll-indicator span {
+    display:block; width:1px; height:40px; margin:0 auto;
+    background:linear-gradient(to bottom, rgba(255,255,255,0.4), transparent);
+    animation:scrollline 2s ease-in-out infinite;
+  }
+  @keyframes scrollline {
+    0%,100% { opacity:0; transform:scaleY(0); transform-origin:top; }
+    30%,70% { opacity:1; transform:scaleY(1); }
+  }
+
+  .container {
+    display:grid; grid-template-columns:1fr 400px;
+    max-width:1320px; margin:0 auto;
+    padding:var(--s9) var(--s7); align-items:start;
+  }
+  .content { padding-right:64px; min-width:0; }
+  .content h2 {
+    font-family:'Poppins', sans-serif; font-size:32px; font-weight:800;
+    color:var(--ink); letter-spacing:-1px; line-height:1.2;
+    margin:var(--s8) 0 var(--s4); overflow-wrap:break-word;
+  }
+  .content h2:first-child { margin-top:0; }
+  .content p {
+    margin-bottom:var(--s4); line-height:1.85; font-size:16px;
+    color:var(--body); font-weight:400;
+  }
+  .content p:last-child { margin-bottom:0; }
+  .section-divider { border-top:1px solid var(--line); margin:var(--block) 0; }
+
+  .pillars { list-style:none; margin:var(--s6) 0; display:flex; flex-direction:column; gap:var(--s3); }
+  .pillars li {
+    background:var(--card); border:1px solid var(--line-soft);
+    border-left:3px solid var(--accent);
+    padding:var(--s4) var(--s5); border-radius:0 var(--radius) var(--radius) 0;
+  }
+  .pillars li p { margin:6px 0 0; font-size:15px; color:#555; }
+  .pillar-tag {
+    font-family:'Poppins', sans-serif; font-size:12px; font-weight:700;
+    letter-spacing:1.5px; text-transform:uppercase; color:var(--ink);
+  }
+
+  .highlight {
+    background:var(--card); border:1px solid var(--line-soft);
+    border-left:3px solid var(--ink);
+    padding:28px var(--s6); margin:var(--s7) 0;
+    border-radius:0 var(--radius) var(--radius) 0;
+    font-size:15px; color:#444; line-height:1.8;
+  }
+  .highlight strong {
+    display:block; margin-bottom:10px; color:var(--ink);
+    font-family:'Poppins', sans-serif; font-weight:700;
+    font-size:16px; letter-spacing:-0.3px;
+  }
+
+  .panel {
+    background:var(--ink); color:#fff;
+    padding:var(--s7) 44px; margin:var(--s7) 0;
+  }
+  .panel-gift    { border-left:3px solid var(--accent); border-radius:0 var(--radius) var(--radius) 0; }
+  .panel-warning { border-top:3px solid var(--accent);  border-radius:0 0 var(--radius) var(--radius); }
+  .panel-label {
+    font-family:'Poppins', sans-serif; font-size:10px; font-weight:700;
+    letter-spacing:2.5px; text-transform:uppercase;
+    color:var(--accent); margin-bottom:14px;
+  }
+  .panel h3 {
+    font-family:'Poppins', sans-serif; font-size:24px; font-weight:800;
+    letter-spacing:-0.5px; line-height:1.25; color:#fff; margin-bottom:var(--s3);
+  }
+  .panel p { color:rgba(255,255,255,0.65); font-size:15px; line-height:1.8; margin-bottom:var(--s2); }
+  .panel p:last-child { margin-bottom:0; }
+  .panel-note {
+    border-left:2px solid rgba(255,255,255,0.2);
+    padding:14px 18px; margin-top:var(--s4);
+    font-size:14px; color:rgba(255,255,255,0.5); font-style:italic;
+  }
+  .panel-lead-in { margin-top:var(--s4); font-weight:600; color:rgba(255,255,255,0.9); }
+  .panel ul { list-style:none; margin-top:14px; }
+  .panel li { padding:6px 0; color:rgba(255,255,255,0.7); font-size:15px; line-height:1.7; }
+
+  .speakers { display:flex; flex-direction:column; gap:var(--s4); margin:28px 0 var(--s5); }
+  .speaker-card {
+    display:flex; align-items:flex-start; gap:var(--s4);
+    background:var(--card); border:1px solid var(--line-soft);
+    padding:var(--s5) 28px; border-radius:var(--radius);
+  }
+  .speaker-photo {
+    width:72px; height:72px; border-radius:50%; object-fit:cover;
+    flex-shrink:0; border:2px solid var(--line);
+  }
+  .speaker-info { flex:1; min-width:0; }
+  .speaker-card h4 {
+    font-family:'Poppins', sans-serif; font-weight:700; font-size:17px;
+    color:var(--ink); margin-bottom:3px; letter-spacing:-0.2px;
+  }
+  .speaker-role {
+    font-family:'Poppins', sans-serif; font-size:11px; font-weight:600;
+    text-transform:uppercase; letter-spacing:1.2px;
+    color:var(--accent); margin-bottom:10px;
+  }
+  .speaker-card p { font-size:14px; line-height:1.7; color:var(--muted); margin:0; }
+  .client-logo-wrap { margin-top:var(--s6); padding-top:28px; border-top:1px solid var(--line); }
+  .client-logo-wrap img { opacity:0.75; }
+  .speakers-footer { font-size:14px; color:#888; margin-top:var(--s2); line-height:1.7; font-style:italic; }
+
+  .form-column { position:sticky; top:var(--s5); height:fit-content; min-width:0; align-self:start; }
+  .form-box {
+    background:var(--card); border:1px solid var(--line);
+    border-radius:6px; overflow:hidden;
+    box-shadow:0 4px 32px rgba(0,0,0,0.06), 0 1px 4px rgba(0,0,0,0.04);
+  }
+  .form-box-header {
+    background:var(--ink); padding:28px var(--s6) var(--s5);
+    border-bottom:3px solid var(--accent);
+  }
+  .form-live-badge {
+    display:inline-flex; align-items:center; gap:7px;
+    font-family:'Poppins', sans-serif; font-size:10px; font-weight:700;
+    letter-spacing:2px; text-transform:uppercase;
+    color:rgba(255,255,255,0.5); margin-bottom:var(--s2);
+  }
+  .form-live-badge span {
+    width:6px; height:6px; border-radius:50%;
+    background:var(--accent); animation:pulse 2s ease-in-out infinite;
+  }
+  .form-box-header h3 {
+    font-family:'Poppins', sans-serif; font-size:24px; font-weight:800;
+    color:#fff; letter-spacing:-0.5px; margin-bottom:6px;
+  }
+  .form-box .subtitle { color:rgba(255,255,255,0.4); font-size:13px; font-style:italic; margin:0; }
+  .form-embed { padding:28px var(--s6) var(--s6); }
+
+  .form-embed form { display:block; }
+  .form-embed .mauticform-innerform { padding:0; }
+  .form-embed .mauticform-field-wrapper { margin-bottom:18px; }
+  .form-embed .mauticform-label {
+    display:block; margin-bottom:var(--s1);
+    font-family:'Poppins', sans-serif; font-weight:600;
+    color:var(--ink); font-size:11px;
+    letter-spacing:0.8px; text-transform:uppercase;
+  }
+  .form-embed input[type="text"],
+  .form-embed input[type="email"],
+  .form-embed input[type="tel"],
+  .form-embed textarea,
+  .form-embed select {
+    width:100%; padding:13px var(--s3);
+    border:1px solid var(--line); border-radius:var(--radius);
+    font-family:'Inter', sans-serif; font-size:15px; color:var(--ink);
+    background:#fafaf8; box-sizing:border-box; transition:border-color 0.15s;
+  }
+  .form-embed input[type="text"]:focus,
+  .form-embed input[type="email"]:focus,
+  .form-embed input[type="tel"]:focus,
+  .form-embed textarea:focus,
+  .form-embed select:focus {
+    outline:none; border-color:var(--ink); background:#fff;
+  }
+  .form-embed button[type="submit"],
+  .form-embed input[type="submit"] {
+    width:100%; padding:var(--s3);
+    background:var(--accent); color:#fff; border:none;
+    border-radius:var(--radius);
+    font-family:'Poppins', sans-serif; font-size:12px; font-weight:700;
+    letter-spacing:1.5px; text-transform:uppercase;
+    cursor:pointer; margin-top:var(--s1);
+    transition:background 0.15s, transform 0.1s;
+  }
+  .form-embed button[type="submit"]:hover,
+  .form-embed input[type="submit"]:hover {
+    background:var(--accent-dk); transform:translateY(-1px);
+  }
+  .form-embed .mauticform-checkbox { display:flex; align-items:flex-start; }
+  .form-embed .mauticform-checkboxes input[type="checkbox"] {
+    width:auto; margin-right:10px; cursor:pointer; flex-shrink:0;
+  }
+  .form-privacy {
+    font-size:12px; color:#999; line-height:1.6;
+    margin-top:var(--s3); text-align:center;
+  }
+
+  .footer {
+    background:var(--ink-deep); padding:52px var(--s4);
+    text-align:center; font-size:13px;
+    color:rgba(255,255,255,0.3); border-top:1px solid #1a1a1a;
+  }
+  .footer img { height:36px; width:auto; opacity:0.6; margin:0 auto var(--s4); }
+  .footer p { margin-bottom:var(--s1); }
+  .footer-legal { margin-top:var(--s2); }
+  .footer a { color:rgba(255,255,255,0.4); text-decoration:none; transition:color 0.15s; }
+  .footer a:hover { color:var(--accent); }
+
+  @media (max-width:1100px) {
+    .container { grid-template-columns:1fr; padding:var(--s9) 28px; }
+    .content { padding-right:0; padding-bottom:48px; border-bottom:1px solid var(--line); }
+    .form-column { position:static; margin-top:48px; }
+  }
+  @media (max-width:768px) {
+    :root { --block: var(--s7); }
+    .hero { padding:70px var(--s4) var(--s9); }
+    .hero h1 { font-size:52px; letter-spacing:-2px; }
+    .hero-sub { font-size:16px; }
+    .stats-bar { flex-direction:column; gap:var(--s5); padding:var(--s6) var(--s4); }
+    .stat { padding:0; }
+    .stat-divider { display:none; }
+    .container { padding:48px var(--s4); }
+    .content h2 { font-size:26px; margin-top:var(--s7); }
+    .panel { padding:28px var(--s5); }
+    .form-box-header { padding:22px var(--s5) var(--s4); }
+    .form-embed { padding:22px var(--s5) var(--s5); }
+  }
+  @media (max-width:480px) {
+    .hero h1 { font-size:40px; letter-spacing:-1.5px; }
+    .speaker-card { flex-direction:column; align-items:center; text-align:center; }
+    .speaker-photo { margin:0 auto; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Mobile sticky bar: keeps one tap between "convinced" and "registered" at
+     every scroll position. -->
+<div class="mobile-topbar">
+  <span class="mobile-topbar-text">📅 {{MOBILE_BAR_DATE}} · {{MOBILE_BAR_TIME}}</span>
+  <a href="#register" class="mobile-topbar-btn">{{MOBILE_BAR_CTA}} →</a>
+</div>
+
+<!-- Hero: the visitor decides in ~3 seconds whether to stay. Answers what is
+     this, is it for me, and when is it. Nothing else belongs here. -->
+<div class="hero">
+  <div class="hero-noise"></div>
+  <div class="hero-content">
+    <div class="hero-eyebrow">
+      <span class="eyebrow-dot"></span>
+      {{HERO_CATEGORY}} · {{HERO_DATE_SHORT}}
+    </div>
+
+    <img class="hero-logo" src="{{LOGO_URL}}" alt="{{BRAND_NAME}}">
+
+    <!-- Headline must echo the promise of the email that sent traffic here
+         (message match). Second half in <em> carries the desirable outcome. -->
+    <h1>{{HERO_WORD_ONE}}<br><em>{{HERO_WORD_TWO}}</em></h1>
+
+    <p class="hero-sub">{{HERO_SUBHEADLINE}}</p>
+
+    <div class="hero-date">
+      <p>📅 {{HERO_DATE_DAY}} &nbsp;·&nbsp; {{HERO_DATE_TIME}}</p>
+    </div>
+  </div>
+  <div class="hero-scroll-indicator"><span></span></div>
+</div>
+
+<!-- Optional stats bar: uncomment only with three real, verifiable numbers.
+<div class="stats-bar">
+  <div class="stat"><div class="stat-n">[NUMBER]</div><div class="stat-l">[what it counts]</div></div>
+  <div class="stat-divider"></div>
+  <div class="stat"><div class="stat-n">[NUMBER]</div><div class="stat-l">[what it counts]</div></div>
+  <div class="stat-divider"></div>
+  <div class="stat"><div class="stat-n">[NUMBER]</div><div class="stat-l">[what it counts]</div></div>
+</div>
+-->
+
+<div class="container">
+
+  <!-- Content column: read the H2s in order, ignoring everything else. They
+       must form a coherent argument on their own. -->
+  <div class="content">
+
+    <!-- Qualifying question: describes the reader's situation, filters the
+         wrong audience out. -->
+    <h2>{{QUALIFYING_QUESTION}}</h2>
+
+    <!-- The shift: one verifiable statistic + one blunt consequence. -->
+    <p>{{THE_SHIFT}}</p>
+
+    <h2>{{METHOD_NAME}}</h2>
+    <p>{{METHOD_SETUP}}</p>
+
+    <!-- Three pillars: complexity is the real objection. Exactly three. -->
+    <ul class="pillars">
+      <li>
+        <div class="pillar-tag">{{PILLAR_1_TAG}}</div>
+        <p>{{PILLAR_1_LINE}}</p>
+      </li>
+      <li>
+        <div class="pillar-tag">{{PILLAR_2_TAG}}</div>
+        <p>{{PILLAR_2_LINE}}</p>
+      </li>
+      <li>
+        <div class="pillar-tag">{{PILLAR_3_TAG}}</div>
+        <p>{{PILLAR_3_LINE}}</p>
+      </li>
+    </ul>
+
+    <!-- Diagnosis box: loss aversion. States the cost of doing nothing. -->
+    <div class="highlight">
+      <strong>{{VERDICT}}</strong>
+      {{VERDICT_BODY}}
+    </div>
+
+    <div class="section-divider"></div>
+
+    <!-- Time objection, handled: promise the recording. Counterintuitively
+         lifts registrations, since a registration is a lead either way. -->
+    <h2>{{TIME_OBJECTION_HEADING}}</h2>
+    <p><strong>{{TIME_OBJECTION_INVITE}}</strong></p>
+    <p>{{TIME_OBJECTION_ANSWER}}</p>
+
+    <!-- Bonus: reciprocity (a real, deliverable asset) + attendance (live
+         only, and mean it). -->
+    <div class="panel panel-gift">
+      <div class="panel-label">{{BONUS_LABEL}}</div>
+      <h3>{{BONUS_NAME}}<br>{{BONUS_VALUE_ANCHOR}}</h3>
+      <p>{{BONUS_DESCRIPTION}}</p>
+      <div class="panel-note">{{BONUS_CONDITION}}</div>
+    </div>
+
+    <div class="section-divider"></div>
+
+    <!-- Disqualifier: telling people this is not for everyone raises
+         perceived value and filters tourists who never show up. -->
+    <div class="panel panel-warning">
+      <div class="panel-label">{{DISQUALIFIER_LABEL}}</div>
+      <h3>{{DISQUALIFIER_HEADING}}</h3>
+      <p>{{DISQUALIFIER_REFUSAL}}</p>
+      <p>{{DISQUALIFIER_POSITIONING}}</p>
+      <p class="panel-lead-in">{{DISQUALIFIER_LEADIN}}</p>
+      <ul>
+        <li>✓ &nbsp;{{CRITERION_1}}</li>
+        <li>✓ &nbsp;{{CRITERION_2}}</li>
+        <li>✓ &nbsp;{{CRITERION_3}}</li>
+      </ul>
+    </div>
+
+    <div class="section-divider"></div>
+
+    <!-- Speakers: people register for people. Real photos, faces visible.
+         Host photos on your own domain -- third-party CDN URLs expire. -->
+    <h2>{{SPEAKERS_HEADING}}</h2>
+    <div class="speakers">
+      <div class="speaker-card">
+        <img class="speaker-photo" src="{{SPEAKER_1_PHOTO_URL}}" alt="{{SPEAKER_1_NAME}}">
+        <div class="speaker-info">
+          <h4>{{SPEAKER_1_NAME}}</h4>
+          <div class="speaker-role">{{SPEAKER_1_ROLE}}</div>
+          <p>{{SPEAKER_1_BIO}}</p>
+        </div>
+      </div>
+      <div class="speaker-card">
+        <img class="speaker-photo" src="{{SPEAKER_2_PHOTO_URL}}" alt="{{SPEAKER_2_NAME}}">
+        <div class="speaker-info">
+          <h4>{{SPEAKER_2_NAME}}</h4>
+          <div class="speaker-role">{{SPEAKER_2_ROLE}}</div>
+          <p>{{SPEAKER_2_BIO}}</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Client proof: borrowed credibility right before the eye travels to
+         the form. Only use logos you have permission to use. -->
+    <div class="client-logo-wrap">
+      <img src="{{CLIENT_LOGOS_URL}}" alt="{{BRAND_NAME}} clients">
+      <p class="speakers-footer">{{CLIENT_PROOF_LINE}}</p>
+    </div>
+  </div>
+
+  <!-- Form column: sticky on desktop, present at whichever moment convinces
+       the visitor. This box IS the persistent CTA -- no buttons elsewhere. -->
+  <div class="form-column" id="register">
+    <div class="form-box">
+      <div class="form-box-header">
+        <div class="form-live-badge"><span></span>{{FORM_BADGE}}</div>
+        <h3>{{FORM_HEADING}}</h3>
+        <div class="subtitle">{{FORM_SUBTITLE}}</div>
+      </div>
+
+      <!-- CSS is scoped to .form-embed, not to a form id: any Mautic form
+           dropped in inherits the styling automatically. -->
+      <div class="form-embed">
+        <span class="atwho-inserted" data-fr-verified="true">{form={{MAUTIC_FORM_ID}}}</span>
+        <p class="form-privacy">{{FORM_PRIVACY_LINE}}</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Footer: minimal by design. Logo, copyright, privacy, terms -- nothing
+     that gives a visitor a reason to leave before filling the form. -->
+<div class="footer">
+  <img src="{{LOGO_URL}}" alt="{{BRAND_NAME}}">
+  <p>© {{FOOTER_YEAR}} {{BRAND_NAME}}. {{FOOTER_RIGHTS}}</p>
+  <p class="footer-legal">
+    <a href="{{PRIVACY_URL}}">Privacy Policy</a> &nbsp;·&nbsp;
+    <a href="{{TERMS_URL}}">Terms of Service</a>
+  </p>
+</div>
+
+</body>
+</html>

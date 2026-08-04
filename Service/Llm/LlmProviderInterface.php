@@ -31,4 +31,15 @@ interface LlmProviderInterface
      * @param callable(string): void                                                     $onText
      */
     public function stream(array $messages, array $tools, string $systemPrompt, string $model, string $apiKey, callable $onText): LlmResult;
+
+    /**
+     * Modeles de chat disponibles pour cette cle API, tels que renvoyes par le
+     * fournisseur (pas de liste codee en dur : les catalogues evoluent trop
+     * vite pour ca).
+     *
+     * @return array<int, array{id: string, label: string}>
+     *
+     * @throws \MauticPlugin\WittyBundle\Service\Llm\Exception\LlmException
+     */
+    public function listModels(string $apiKey): array;
 }

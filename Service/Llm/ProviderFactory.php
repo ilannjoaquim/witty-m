@@ -16,16 +16,17 @@ class ProviderFactory
         AnthropicProvider $anthropic,
         OpenAiProvider $openAi,
         GeminiProvider $gemini,
+        DeepSeekProvider $deepSeek,
         private WittyConfig $config,
     ) {
-        foreach ([$anthropic, $openAi, $gemini] as $provider) {
+        foreach ([$anthropic, $openAi, $gemini, $deepSeek] as $provider) {
             $this->providers[$provider->getKey()] = $provider;
         }
     }
 
     public function get(?string $key = null): LlmProviderInterface
     {
-        $key ??= $this->config->getProvider();
+        $key ??= $this->config->getDefaultProvider();
 
         if (!isset($this->providers[$key])) {
             throw new LlmException(sprintf('Fournisseur IA inconnu : %s', $key));

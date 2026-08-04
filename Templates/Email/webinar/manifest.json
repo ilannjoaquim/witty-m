@@ -1,0 +1,162 @@
+{
+    "key": "webinar",
+    "name": "Webinar",
+    "description": "Reminder / last-call email before a webinar. Single goal: the click to the registration page. Structure: hook visual, promise block, P.A.S. body (problem, agitation, solution), agenda, bonus, three CTAs pointing to the same URL.",
+    "language": "en",
+    "goal": "Get the reader to click through to the registration page. Do not add links to a blog, a website or social media: every extra link splits the click rate.",
+    "rules": [
+        "One goal only: the click to the registration page.",
+        "The three CTAs point to the SAME url; only the wording changes.",
+        "Write to one person, not to a list.",
+        "Sell the registration, not the webinar. The landing page sells the content.",
+        "Benefit over feature: not 'we will talk about X' but 'you will leave with X'.",
+        "Keep at least 60% real text: an image-heavy email lands in spam and shows up empty when images are blocked.",
+        "Never invent a number for the social proof. No number available means the block gets a factual statement instead."
+    ],
+    "placeholders": [
+        {
+            "key": "BRAND_NAME",
+            "label": "Brand name",
+            "guidance": "Used as the logo alt text and in the footer.",
+            "example": "Acme Studio"
+        },
+        {
+            "key": "LOGO_URL",
+            "label": "Logo URL",
+            "guidance": "160-200px wide, transparent PNG, hosted on your own domain. Google Drive and Dropbox links break.",
+            "default": "https://placehold.co/360x120/000000/ffffff/png?text=YOUR+LOGO"
+        },
+        {
+            "key": "HERO_IMAGE_URL",
+            "label": "Hook visual URL",
+            "guidance": "600x338 (16:9). Must announce the topic or the format: speaker's face, screen capture of the method, preview of the bonus. GIF under 1 MB, JPG under 200 KB. A decorative visual that says nothing wastes the reader's attention.",
+            "default": "https://media3.giphy.com/media/v1.Y2lkPTc5MGI3NjExeThrY2gxZDFkejBnNnoydHozNnZla2V3bjhnemhuYW42Z3U2M3RpcCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/TjlE8AtuJTPxmuDdnk/giphy.gif"
+        },
+        {
+            "key": "HERO_IMAGE_ALT",
+            "label": "Hook visual alt text",
+            "guidance": "Describe what the reader will see or learn. Around 40% of opens block images: the alt text must still sell.",
+            "example": "Preview of the 3-step launch method"
+        },
+        {
+            "key": "HEADLINE",
+            "label": "Headline",
+            "guidance": "6 to 12 words creating tension. Pick one angle: urgency ('Last call: tomorrow at 10:30'), curiosity ('What founders still get wrong in 2026'), stakes ('Your list will lose 30% if you do nothing') or outcome ('50 qualified leads in 30 days, without ads'). Ban 'Invitation to our webinar' and 'Don't miss this event': zero tension.",
+            "example": "Last call: tomorrow at 10:30"
+        },
+        {
+            "key": "SUBHEADLINE",
+            "label": "Subheadline",
+            "guidance": "One sentence, 12 to 20 words: action verb + measurable result + the constraint lifted ('without', 'in under', 'even if'). A number beats an adjective.",
+            "example": "How to build a full campaign in under an hour, even without a designer."
+        },
+        {
+            "key": "SOCIAL_PROOF",
+            "label": "Social proof",
+            "guidance": "One verifiable number. By decreasing power: attendees, customers, average rating, a known client name. Without a number, state experience instead ('12 years running these launches'). Never invent it.",
+            "example": "Already followed by 2,600+ marketers"
+        },
+        {
+            "key": "READING_TIME",
+            "label": "Cost of entry",
+            "guidance": "Removes the 'how long will this take me' friction before it appears. Be honest, around 200 words per minute.",
+            "example": "(2 min read - 45 min for the webinar)"
+        },
+        {
+            "key": "DATE_REMINDER",
+            "label": "Date reminder above the first CTA",
+            "guidance": "Short, scannable, with a coloured anchor. Repeats when it happens to create time scarcity.",
+            "example": "🟢 LIVE WEBINAR | Tomorrow at 10:30 CET"
+        },
+        {
+            "key": "CTA_PRIMARY",
+            "label": "CTA 1",
+            "guidance": "3 to 6 words in the first person, so the reader reads their own commitment. Never 'Click here' or 'Learn more'.",
+            "example": "I'm saving my seat"
+        },
+        {
+            "key": "REGISTRATION_URL",
+            "label": "Registration URL",
+            "guidance": "The single destination of the three buttons. Add UTM parameters. Any other link in the email splits the click rate.",
+            "example": "https://example.com/webinar?utm_source=mautic&utm_campaign=webinar-reminder"
+        },
+        {
+            "key": "PROBLEM",
+            "label": "Problem",
+            "guidance": "One short affirmative sentence describing the reader's reality, no hedging. They must think 'that is exactly my situation'. Never open by talking about yourself.",
+            "example": "In 2026, everything you learned about cold outreach stopped working."
+        },
+        {
+            "key": "AGITATION",
+            "label": "Agitation",
+            "guidance": "2 to 3 sentences on the cost of doing nothing: wasted effort, lost time, the widening gap with competitors. Loss aversion moves people about twice as much as the lure of gain, but exaggerated fear triggers rejection. Stay factual.",
+            "example": "You keep sending, and the replies keep drying up. Every week spent on the old playbook is a week your competitors use to book the meetings you wanted."
+        },
+        {
+            "key": "TRANSITION",
+            "label": "Transition",
+            "guidance": "One short pivot sentence that restarts the reading after the negative passage and positions you as the one holding the answer.",
+            "example": "Tomorrow, we fix that together."
+        },
+        {
+            "key": "APPOINTMENT",
+            "label": "Appointment line",
+            "guidance": "Day + date + time + timezone for international audiences, then the promise. Must be spottable while skimming. Check the date on every reuse: an inconsistent date destroys credibility.",
+            "example": "📅 Thursday 12 March, 10:30 CET — the outreach system that books 8 meetings a week"
+        },
+        {
+            "key": "CTA_SECONDARY",
+            "label": "CTA 2",
+            "guidance": "Same URL, a variation of the first label. Placed at the intent peak, right after the promise.",
+            "example": "Save my seat now 🔥"
+        },
+        {
+            "key": "BULLET_1",
+            "label": "Agenda bullet 1",
+            "guidance": "Why what the reader does today no longer works. A benefit or a destroyed objection, never a topic. Add a number if you have one.",
+            "example": "Why 80% of outreach sequences now get filtered before they are read"
+        },
+        {
+            "key": "BULLET_2",
+            "label": "Agenda bullet 2",
+            "guidance": "What changed, or what the reader does not know yet.",
+            "example": "The inbox rule that changed in January and nobody told you about"
+        },
+        {
+            "key": "BULLET_3",
+            "label": "Agenda bullet 3",
+            "guidance": "The concrete method they will leave with, plus the measurable result. Put the most desirable item last.",
+            "example": "The 3-message sequence we use to book 8 meetings a week"
+        },
+        {
+            "key": "BONUS_TITLE",
+            "label": "Bonus",
+            "guidance": "Name the asset precisely: template, audit, checklist, script, access. 'The Notion template we use with our 150 clients' beats 'a gift'. Tie it to staying until the end: that lifts the show-up rate, which is the real KPI.",
+            "example": "The outreach template pack, free for everyone who stays to the end"
+        },
+        {
+            "key": "BONUS_PROOF",
+            "label": "Bonus proof or scarcity",
+            "guidance": "One line of proof or scarcity to make the bonus credible.",
+            "example": "Already used with more than 150 clients. Not downloadable anywhere else."
+        },
+        {
+            "key": "CLOSING",
+            "label": "Closing line",
+            "guidance": "One sentence with a TRUE urgency (registrations close tonight, limited seats, no replay). No new argument here, you are closing. A fake scarcity, once spotted, costs you trust for every campaign that follows.",
+            "example": "Registrations close tonight — grab your seat:"
+        },
+        {
+            "key": "CTA_FINAL",
+            "label": "CTA 3",
+            "guidance": "Last variation. This bottom block must work on its own for readers who scrolled straight down.",
+            "example": "I'm taking my seat 🔐"
+        },
+        {
+            "key": "POSTAL_ADDRESS",
+            "label": "Postal address",
+            "guidance": "Full postal address. Legally required (GDPR / CAN-SPAM) and checked by Gmail and Outlook.",
+            "example": "Acme Studio, 12 rue de la Paix, 75002 Paris, France"
+        }
+    ]
+}

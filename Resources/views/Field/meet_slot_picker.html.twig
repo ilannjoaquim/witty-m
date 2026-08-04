@@ -1,0 +1,432 @@
+{#
+  Champ "Creneau de rendez-vous" (type: witty.meet_slot_picker).
+
+  Rendu minimal en pur JS (pas de dependance jQuery : les formulaires publics
+  Mautic n'en garantissent pas la presence). Un input cache porte la valeur
+  reellement soumise (mauticform[{alias}], format ISO 8601) ; le calendrier
+  (mois navigable + creneaux du jour selectionne) n'est qu'une interface
+  au-dessus, alimentee par /witty/meet/slots/{fieldId}?month=YYYY-MM.
+
+  Variables (cf. Builder/form.html.twig) :
+    - field (tableau, Field::convertToArray)
+    - formName (absent dans le rendu "ajout d'un nouveau champ" du builder,
+      cf. Builder/_field_wrapper.html.twig -> defaut defensif ci-dessous)
+    - id (= field.alias sur le formulaire publie, = field.id temporaire dans
+      le builder avant enregistrement)
+    - inBuilder
+    - inForm (true quand ce rendu est l'apercu dans l'onglet "Fields" du
+      builder, cf. Builder/index.html.twig et _field_wrapper.html.twig) :
+      cet apercu est imbrique DANS le <form> du formulaire d'edition Mautic
+      lui-meme (form_start(form) tout en haut de Builder/index.html.twig).
+      Un input actif ici serait donc soumis en plus des champs attendus par
+      ce formulaire d'edition au moment du Save -> "This form should not
+      contain extra fields." Meme convention que Field/text.html.twig :
+      l'input de l'apercu doit etre disabled pour ne jamais etre serialise.
+    - language (optionnel, absent dans le rendu builder)
+
+  Personnalisation visuelle : toutes les couleurs/espacements sont des
+  variables CSS declarees sur .witty-slot-picker (voir le bloc <style>
+  ci-dessous). Un theme peut les redefinir par simple surcharge CSS, ex. :
+    .mauticform-row.mauticform-witty_meet_slot_picker .witty-slot-picker {
+      --witty-accent: #ff6600;
+    }
+  (selecteur volontairement peu specifique cote plugin pour rester facile a
+  surcharger).
+#}
+{% set formName = formName|default('') %}
+{% set order = field.order|default(0) %}
+{% set inputName = 'mauticform[' ~ field.alias ~ ']' %}
+{% set inputId = 'mauticform_input' ~ formName ~ '_' ~ field.alias %}
+{% set containerId = 'mauticform' ~ formName ~ '_' ~ id %}
+{% set widgetId = 'witty-slot-picker' ~ formName ~ '_' ~ field.alias %}
+
+{% set containerAttributes = htmlAttributesStringToArray(field.containerAttributes|default('')) %}
+{% set containerClass = (containerAttributes.class|default('') ~ ' mauticform-row mauticform-witty_meet_slot_picker mauticform-field-' ~ order)|trim %}
+
+<div id="{{ containerId }}" class="{{ containerClass }}" style="width: {{ field.fieldWidth }}"
+     {% if field.isRequired %}data-validate="{{ field.alias }}" data-validation-type="{{ field.type }}"{% endif %}>
+  {% if field.showLabel %}<label id="mauticform_label{{ formName }}_{{ field.alias }}" for="{{ inputId }}" class="mauticform-label">{{ field.label|purify_allow_target_blank }}</label>{% endif %}
+
+  {% if field.helpMessage is not empty %}<span class="mauticform-helpmessage">{{ field.helpMessage|purify_allow_target_blank }}</span>{% endif %}
+
+  <input type="hidden" name="{{ inputName }}" id="{{ inputId }}" value="" {% if inForm is defined and inForm %}disabled="disabled"{% endif %} />
+
+  {% if inBuilder %}
+    <div class="alert alert-info witty-slot-picker-builder-note">{{ 'mautic.witty.meet.slotpicker.builder_placeholder'|trans }}</div>
+  {% else %}
+    <div id="{{ widgetId }}" class="witty-slot-picker" data-field-id="{{ field.id }}" data-input-id="{{ inputId }}" data-container-id="{{ containerId }}"
+         data-slots-url="{{ url('witty_meet_slots_availability', {'fieldId': field.id}) }}"
+         data-label-loading="{{ 'mautic.witty.meet.slotpicker.loading'|trans }}"
+         data-label-empty="{{ 'mautic.witty.meet.slotpicker.no_slots'|trans }}"
+         data-label-error="{{ 'mautic.witty.meet.slotpicker.load_error'|trans }}"
+         data-label-selected="{{ 'mautic.witty.meet.slotpicker.selected'|trans }}"
+         data-label-select-date="{{ 'mautic.witty.meet.slotpicker.select_date'|trans }}"
+         data-label-prev="{{ 'mautic.witty.meet.slotpicker.prev_month'|trans }}"
+         data-label-next="{{ 'mautic.witty.meet.slotpicker.next_month'|trans }}"
+         data-locale="{{ language|default('en') }}">
+      <div class="witty-slot-picker-calendar">
+        <div class="witty-slot-picker-cal-header">
+          <button type="button" class="witty-slot-picker-nav witty-slot-picker-prev" aria-label="{{ 'mautic.witty.meet.slotpicker.prev_month'|trans }}">&lsaquo;</button>
+          <span class="witty-slot-picker-month-label"></span>
+          <button type="button" class="witty-slot-picker-nav witty-slot-picker-next" aria-label="{{ 'mautic.witty.meet.slotpicker.next_month'|trans }}">&rsaquo;</button>
+        </div>
+        <div class="witty-slot-picker-weekdays"></div>
+        <div class="witty-slot-picker-grid"></div>
+      </div>
+      <div class="witty-slot-picker-times-panel">
+        <div class="witty-slot-picker-times-title"></div>
+        <div class="witty-slot-picker-times"></div>
+      </div>
+      <div class="witty-slot-picker-status" role="status" aria-live="polite"></div>
+    </div>
+  {% endif %}
+
+  <span class="mauticform-errormsg" aria-live="polite" aria-atomic="true" aria-hidden="true" style="display:none;">{{ field.validationMessage }}</span>
+</div>
+
+{% if not inBuilder %}
+<style type="text/css">
+  .witty-slot-picker {
+    --witty-accent: #4e5e9e;
+    --witty-accent-contrast: #ffffff;
+    --witty-border: #e0e0e0;
+    --witty-bg: #ffffff;
+    --witty-text: #333333;
+    --witty-muted: #9aa0a6;
+    --witty-radius: 6px;
+    --witty-gap: 20px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--witty-gap);
+    margin-top: 8px;
+    max-width: 560px;
+    box-sizing: border-box;
+  }
+  .witty-slot-picker * { box-sizing: border-box; }
+  .witty-slot-picker-calendar {
+    flex: 1 1 260px;
+    min-width: 240px;
+    border: 1px solid var(--witty-border);
+    border-radius: var(--witty-radius);
+    padding: 12px;
+    background: var(--witty-bg);
+  }
+  .witty-slot-picker-cal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+    font-weight: 600;
+    color: var(--witty-text);
+    font-size: 14px;
+  }
+  .witty-slot-picker-nav {
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    font-size: 18px;
+    line-height: 1;
+    padding: 4px 10px;
+    border-radius: var(--witty-radius);
+    color: var(--witty-text);
+  }
+  .witty-slot-picker-nav:hover:not(:disabled) { background: var(--witty-border); }
+  .witty-slot-picker-nav:disabled { opacity: .3; cursor: default; }
+  .witty-slot-picker-weekdays, .witty-slot-picker-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 2px;
+    text-align: center;
+  }
+  .witty-slot-picker-weekdays {
+    margin-bottom: 4px;
+    font-size: 11px;
+    color: var(--witty-muted);
+    text-transform: uppercase;
+  }
+  .witty-slot-picker-day-cell {
+    border: none;
+    background: transparent;
+    padding: 8px 0;
+    border-radius: var(--witty-radius);
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--witty-text);
+  }
+  .witty-slot-picker-day-cell:disabled { color: var(--witty-muted); cursor: default; opacity: .35; }
+  .witty-slot-picker-day-cell.is-outside { visibility: hidden; }
+  .witty-slot-picker-day-cell:hover:not(:disabled) { background: var(--witty-border); }
+  .witty-slot-picker-day-cell.is-selected { background: var(--witty-accent); color: var(--witty-accent-contrast); }
+  .witty-slot-picker-times-panel { flex: 1 1 180px; min-width: 160px; }
+  .witty-slot-picker-times-title {
+    font-weight: 600;
+    margin-bottom: 8px;
+    color: var(--witty-text);
+    font-size: 13px;
+    min-height: 1.2em;
+  }
+  .witty-slot-picker-times {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 280px;
+    overflow-y: auto;
+  }
+  .witty-slot-picker-time {
+    border: 1px solid var(--witty-border);
+    background: var(--witty-bg);
+    border-radius: var(--witty-radius);
+    padding: 8px 12px;
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--witty-text);
+    text-align: center;
+  }
+  .witty-slot-picker-time:hover { border-color: var(--witty-accent); }
+  .witty-slot-picker-time.is-selected { background: var(--witty-accent); border-color: var(--witty-accent); color: var(--witty-accent-contrast); }
+  .witty-slot-picker-status { flex-basis: 100%; font-size: 13px; color: var(--witty-muted); }
+</style>
+<script type="text/javascript">
+(function () {
+  // Le theme/la page peut deplacer ce <script> avant le <div> qu'il cible
+  // dans le HTML final (constate en pratique) : on ne peut pas supposer que
+  // le DOM environnant est deja parse au moment ou ce script s'execute.
+  if ('loading' === document.readyState) {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+
+  function init() {
+  var widget = document.getElementById({{ widgetId|json_encode|raw }});
+  if (!widget || widget.getAttribute('data-witty-initialized')) {
+    return;
+  }
+  widget.setAttribute('data-witty-initialized', '1');
+
+  // Meme fenetre max que MeetSlotAvailabilityCalculator::MAX_ADVANCE_DAYS
+  // (180 jours ~ 6 mois) : juste pour desactiver la navigation "suivant" au
+  // bon endroit, la vraie limite reste appliquee cote serveur.
+  var MAX_ADVANCE_MONTHS = 6;
+
+  var input      = document.getElementById(widget.getAttribute('data-input-id'));
+  var container  = document.getElementById(widget.getAttribute('data-container-id'));
+  var slotsUrl   = widget.getAttribute('data-slots-url');
+  var locale     = widget.getAttribute('data-locale') || undefined;
+
+  var monthLabelEl = widget.querySelector('.witty-slot-picker-month-label');
+  var prevBtn       = widget.querySelector('.witty-slot-picker-prev');
+  var nextBtn       = widget.querySelector('.witty-slot-picker-next');
+  var weekdaysEl    = widget.querySelector('.witty-slot-picker-weekdays');
+  var gridEl        = widget.querySelector('.witty-slot-picker-grid');
+  var timesTitleEl  = widget.querySelector('.witty-slot-picker-times-title');
+  var timesEl       = widget.querySelector('.witty-slot-picker-times');
+  var statusEl      = widget.querySelector('.witty-slot-picker-status');
+
+  var today       = new Date();
+  var minMonth    = startOfMonth(today);
+  var maxMonth    = addMonths(minMonth, MAX_ADVANCE_MONTHS);
+  var currentMonth = startOfMonth(today);
+  var monthCache  = {};
+  var selectedDayKey = null;
+
+  function startOfMonth(d) {
+    return new Date(d.getFullYear(), d.getMonth(), 1);
+  }
+
+  function addMonths(d, n) {
+    return new Date(d.getFullYear(), d.getMonth() + n, 1);
+  }
+
+  function monthParam(d) {
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+  }
+
+  function dayKey(date) {
+    return date.getFullYear() + '-' + (date.getMonth() + 1) + '-' + date.getDate();
+  }
+
+  function setStatus(text) {
+    statusEl.textContent = text || '';
+  }
+
+  function clearContainerError() {
+    if (container) {
+      container.classList.remove('mauticform-has-error');
+      var msg = container.querySelector('.mauticform-errormsg');
+      if (msg) {
+        msg.style.display = 'none';
+      }
+    }
+  }
+
+  function renderHeader() {
+    monthLabelEl.textContent = currentMonth.toLocaleDateString(locale, { month: 'long', year: 'numeric' });
+    prevBtn.disabled = currentMonth.getTime() <= minMonth.getTime();
+    nextBtn.disabled = currentMonth.getTime() >= maxMonth.getTime();
+  }
+
+  function renderWeekdays() {
+    if (weekdaysEl.childElementCount) {
+      return;
+    }
+    var ref = new Date(2023, 0, 2); // un lundi, sert juste de reference pour les libelles
+    for (var i = 0; i < 7; i++) {
+      var span = document.createElement('span');
+      span.textContent = ref.toLocaleDateString(locale, { weekday: 'short' });
+      weekdaysEl.appendChild(span);
+      ref.setDate(ref.getDate() + 1);
+    }
+  }
+
+  function renderGrid(monthData) {
+    gridEl.innerHTML = '';
+    var year   = currentMonth.getFullYear();
+    var month  = currentMonth.getMonth();
+    var firstOfMonth = new Date(year, month, 1);
+    var startOffset  = (firstOfMonth.getDay() + 6) % 7; // lundi = 0
+    var daysInMonth  = new Date(year, month + 1, 0).getDate();
+
+    for (var i = 0; i < startOffset; i++) {
+      var filler = document.createElement('button');
+      filler.type = 'button';
+      filler.className = 'witty-slot-picker-day-cell is-outside';
+      filler.disabled = true;
+      gridEl.appendChild(filler);
+    }
+
+    for (var day = 1; day <= daysInMonth; day++) {
+      (function (day) {
+        var date = new Date(year, month, day);
+        var key  = dayKey(date);
+        var hasSlots = !!(monthData.byDay[key] && monthData.byDay[key].length);
+
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'witty-slot-picker-day-cell';
+        btn.textContent = String(day);
+
+        if (!hasSlots) {
+          btn.disabled = true;
+        } else {
+          btn.addEventListener('click', function () {
+            selectDay(key, date, monthData);
+          });
+        }
+
+        if (key === selectedDayKey) {
+          btn.classList.add('is-selected');
+        }
+
+        gridEl.appendChild(btn);
+      })(day);
+    }
+  }
+
+  function selectDay(key, date, monthData) {
+    selectedDayKey = key;
+    renderGrid(monthData);
+    renderTimes(key, date, monthData);
+  }
+
+  function renderTimes(key, date, monthData) {
+    timesTitleEl.textContent = date.toLocaleDateString(locale, { weekday: 'long', day: 'numeric', month: 'long' });
+    timesEl.innerHTML = '';
+
+    (monthData.byDay[key] || []).forEach(function (slot) {
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'witty-slot-picker-time';
+      btn.textContent = slot.date.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' });
+      btn.addEventListener('click', function () {
+        Array.prototype.forEach.call(timesEl.children, function (el) {
+          el.classList.remove('is-selected');
+        });
+        btn.classList.add('is-selected');
+        input.value = slot.iso;
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        clearContainerError();
+        setStatus(widget.getAttribute('data-label-selected') + ' ' + timesTitleEl.textContent + ' ' + btn.textContent);
+      });
+      timesEl.appendChild(btn);
+    });
+  }
+
+  function afterLoad(monthData) {
+    renderGrid(monthData);
+
+    var hasAnyDay = Object.keys(monthData.byDay).length > 0;
+
+    if (!hasAnyDay) {
+      timesTitleEl.textContent = '';
+      timesEl.innerHTML = '';
+      setStatus(widget.getAttribute('data-label-empty'));
+      return;
+    }
+
+    setStatus('');
+
+    if (!selectedDayKey || !monthData.byDay[selectedDayKey]) {
+      timesTitleEl.textContent = widget.getAttribute('data-label-select-date');
+      timesEl.innerHTML = '';
+    }
+  }
+
+  function loadMonth(monthDate) {
+    var key = monthParam(monthDate);
+    renderHeader();
+
+    if (monthCache[key]) {
+      afterLoad(monthCache[key]);
+      return;
+    }
+
+    setStatus(widget.getAttribute('data-label-loading'));
+
+    fetch(slotsUrl + (slotsUrl.indexOf('?') === -1 ? '?' : '&') + 'month=' + key, { credentials: 'omit' })
+      .then(function (response) {
+        if (!response.ok) {
+          throw new Error('http_error');
+        }
+        return response.json();
+      })
+      .then(function (data) {
+        var byDay = {};
+        (data.slots || []).forEach(function (iso) {
+          var date = new Date(iso);
+          var dKey = dayKey(date);
+          (byDay[dKey] = byDay[dKey] || []).push({ iso: iso, date: date });
+        });
+        var monthData = { byDay: byDay };
+        monthCache[key] = monthData;
+        afterLoad(monthData);
+      })
+      .catch(function () {
+        setStatus(widget.getAttribute('data-label-error'));
+      });
+  }
+
+  prevBtn.addEventListener('click', function () {
+    if (prevBtn.disabled) {
+      return;
+    }
+    currentMonth = addMonths(currentMonth, -1);
+    loadMonth(currentMonth);
+  });
+
+  nextBtn.addEventListener('click', function () {
+    if (nextBtn.disabled) {
+      return;
+    }
+    currentMonth = addMonths(currentMonth, 1);
+    loadMonth(currentMonth);
+  });
+
+  renderWeekdays();
+  renderHeader();
+  loadMonth(currentMonth);
+  }
+})();
+</script>
+{% endif %}

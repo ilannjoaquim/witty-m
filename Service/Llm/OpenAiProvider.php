@@ -12,16 +12,65 @@ use MauticPlugin\WittyBundle\Service\WittyConfig;
 
 class OpenAiProvider extends AbstractHttpProvider
 {
-    private const ENDPOINT = 'https://api.openai.com/v1/chat/completions';
+    // protected + static:: (pas self::) plus bas : DeepSeekProvider herite de
+    // cette classe (API "chat/completions" compatible OpenAI a l'identique) et
+    // ne redefinit que ces deux constantes + getKey()/listModels().
+    protected const ENDPOINT        = 'https://api.openai.com/v1/chat/completions';
+    protected const MODELS_ENDPOINT = 'https://api.openai.com/v1/models';
+
+    /**
+     * L'API renvoie tout le catalogue OpenAI (audio, image, embeddings,
+     * moderation, bases legacy...), pas seulement les modeles de chat que ce
+     * plugin sait appeler. Filtre heuristique par sous-chaine, a affiner si
+     * OpenAI introduit une nouvelle famille non conversationnelle.
+     */
+    private const EXCLUDED_SUBSTRINGS = [
+        'embedding', 'whisper', 'tts', 'dall-e', 'moderation',
+        'davinci', 'babbage', 'curie', 'ada-',
+    ];
 
     public function getKey(): string
     {
         return WittyConfig::PROVIDER_OPENAI;
     }
 
+    /**
+     * @return array<int, array{id: string, label: string}>
+     */
+    public function listModels(string $apiKey): array
+    {
+        $data   = $this->get(static::MODELS_ENDPOINT, $this->headers($apiKey));
+        $models = [];
+
+        foreach ((array) ($data['data'] ?? []) as $model) {
+            $id = (string) ($model['id'] ?? '');
+
+            if ('' === $id || $this->isExcluded($id)) {
+                continue;
+            }
+
+            $models[] = ['id' => $id, 'label' => $id];
+        }
+
+        usort($models, static fn (array $a, array $b): int => $a['id'] <=> $b['id']);
+
+        return $models;
+    }
+
+    private function isExcluded(string $id): bool
+    {
+        foreach (self::EXCLUDED_SUBSTRINGS as $needle) {
+            if (str_contains($id, $needle)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     public function chat(array $messages, array $tools, string $systemPrompt, string $model, string $apiKey): LlmResult
     {
-        $data = $this->post(self::ENDPOINT, $this->payload($messages, $tools, $systemPrompt, $model), $this->headers($apiKey));
+        $data = $this->post(static::ENDPOINT, $this->payload($messages, $tools, $systemPrompt, $model), $this->headers($apiKey));
 
         $choice    = $data['choices'][0]['message'] ?? [];
         $toolCalls = [];
@@ -61,7 +110,7 @@ class OpenAiProvider extends AbstractHttpProvider
         $pending = [];
         $usage   = [];
 
-        $this->streamPost(self::ENDPOINT, $payload, $this->headers($apiKey), function (array $event) use (&$text, &$pending, &$usage, $onText): void {
+        $this->streamPost(static::ENDPOINT, $payload, $this->headers($apiKey), function (array $event) use (&$text, &$pending, &$usage, $onText): void {
             if (isset($event['usage']) && is_array($event['usage'])) {
                 $usage = $event['usage'];
             }

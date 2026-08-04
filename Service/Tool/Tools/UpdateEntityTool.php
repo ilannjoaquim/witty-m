@@ -31,7 +31,7 @@ class UpdateEntityTool extends AbstractTool
     public function getDescription(): string
     {
         return 'Modifie un objet existant : nom, description, publication. '
-            .'Types acceptes : email, page, segment, campaign, form. '
+            .'Types acceptes : '.implode(', ', $this->catalog->getTypes()).'. '
             .'Utiliser list_entities au prealable pour recuperer l identifiant.';
     }
 
@@ -103,8 +103,13 @@ class UpdateEntityTool extends AbstractTool
             ]);
         }
 
-        if (isset($changes['name']) && method_exists($entity, 'setName')) {
-            $entity->setName($changes['name']['vers']);
+        if (isset($changes['name'])) {
+            if (method_exists($entity, 'setName')) {
+                $entity->setName($changes['name']['vers']);
+            } elseif (method_exists($entity, 'setTitle')) {
+                // Asset n a pas de setName, seulement setTitle.
+                $entity->setTitle($changes['name']['vers']);
+            }
         }
 
         if (isset($changes['description']) && method_exists($entity, 'setDescription')) {

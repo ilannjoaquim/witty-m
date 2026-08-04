@@ -1,0 +1,355 @@
+{% extends '@MauticCore/Default/content.html.twig' %}
+
+{% block mauticContent 'wittySkills' %}
+
+{% block headerTitle %}{{ 'mautic.witty.skill.header'|trans }}{% endblock %}
+
+{% block actions %}
+    {% include '@MauticCore/Helper/button.html.twig' with {
+        buttons: [
+            {
+                label: 'mautic.witty.skill.create',
+                icon: 'ri-add-line',
+                variant: 'primary',
+                attributes: { id: 'witty-skill-create-btn', type: 'button' }
+            }
+        ]
+    } %}
+{% endblock %}
+
+{% block content %}
+<style>
+    /* Complements des classes Mautic reelles (btn, table, page-header...) : pas
+       de reimplementation, juste ce que Mautic ne fournit pas deja. */
+    #witty-skill-app .panel { margin-bottom: 0; }
+    .witty-skill-description { color: var(--text-secondary, #6b7280); font-size: 13px; max-width: 420px; }
+    .witty-skill-modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 1050; align-items: flex-start; justify-content: center; padding: 60px 16px; overflow-y: auto; }
+    .witty-skill-modal-overlay.open { display: flex; }
+    .witty-skill-modal { background: #fff; border-radius: 4px; width: 100%; max-width: 680px; box-shadow: 0 2px 18px rgba(0,0,0,.2); }
+    .witty-skill-modal-body { padding: 20px 24px; }
+    .witty-skill-modal-body h2 { margin: 0 0 18px; font-size: 20px; font-weight: 400; }
+    .witty-skill-modal .form-group { margin-bottom: 16px; }
+    .witty-skill-modal label { display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px; }
+    .witty-skill-modal textarea.form-control { min-height: 260px; font-family: monospace; font-size: 12px; }
+    .witty-skill-import-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+    .witty-skill-modal .form-row { display: flex; gap: 16px; }
+    .witty-skill-modal .form-row .form-group { flex: 1; }
+    .witty-skill-modal-footer { display: flex; }
+    .witty-skill-modal-footer .btn { flex: 1; border-radius: 0; justify-content: center; }
+    .witty-skill-modal-footer .btn:first-child { border-bottom-left-radius: 4px; }
+    .witty-skill-modal-footer .btn:last-child { border-bottom-right-radius: 4px; }
+</style>
+
+<div id="witty-skill-app"
+     data-data-endpoint="{{ path('witty_skills_data') }}"
+     data-save-endpoint="{{ path('witty_skills_save') }}"
+     data-delete-endpoint="{{ path('witty_skills_delete') }}"
+     data-category-new-url="{{ path('mautic_category_action', { bundle: 'witty_skill', objectAction: 'new', inForm: 1 }) }}">
+
+    <p class="text-muted">{{ 'mautic.witty.skill.intro'|trans }}</p>
+
+    <div id="witty-skill-list-wrapper" class="panel panel-default">
+        <div class="panel-body pb-0">
+            <div class="input-group d-flex">
+                <span class="input-group-addon"><i class="ri-search-line" aria-hidden="true"></i></span>
+                <input type="search" id="witty-skill-filter" class="form-control search" placeholder="{{ 'mautic.witty.skill.filter'|trans }}" autocomplete="off">
+            </div>
+        </div>
+        <div id="witty-skill-list"></div>
+        <div id="witty-skill-empty" class="mt-80 mb-80 col-md-offset-2 col-lg-offset-3 col-md-8 col-lg-6" style="display:none;">
+            {{ include('@MauticCore/Components/content-block.html.twig', {
+                heading: 'mautic.witty.skill.empty_heading',
+                copy: 'mautic.witty.skill.empty',
+            }) }}
+        </div>
+    </div>
+
+    <div id="witty-skill-modal-overlay" class="witty-skill-modal-overlay">
+        <div class="witty-skill-modal" id="witty-skill-modal"></div>
+    </div>
+</div>
+
+<script>
+(function () {
+    var app = document.getElementById('witty-skill-app');
+    if (!app || app.dataset.wittyReady === '1') { return; }
+    app.dataset.wittyReady = '1';
+
+    var list        = document.getElementById('witty-skill-list');
+    var emptyState  = document.getElementById('witty-skill-empty');
+    var overlay     = document.getElementById('witty-skill-modal-overlay');
+    var modal       = document.getElementById('witty-skill-modal');
+    var filterInput = document.getElementById('witty-skill-filter');
+    var allSkills   = [];
+    var filterTerm  = '';
+    var options     = { categories: [], projects: [] };
+
+    function headersForm() {
+        return { 'X-Requested-With': 'XMLHttpRequest', 'X-CSRF-Token': window.mauticAjaxCsrf || '' };
+    }
+
+    function toForm(data) {
+        var params = new URLSearchParams();
+        Object.keys(data).forEach(function (key) {
+            var value = data[key];
+            if (Array.isArray(value)) {
+                value.forEach(function (v) { params.append(key + '[]', v); });
+            } else {
+                params.append(key, value);
+            }
+        });
+        return params;
+    }
+
+    function openModal(html) {
+        modal.innerHTML = html;
+        overlay.classList.add('open');
+    }
+
+    function closeModal() {
+        overlay.classList.remove('open');
+        modal.innerHTML = '';
+    }
+
+    overlay.addEventListener('click', function (event) {
+        if (event.target === overlay) { closeModal(); }
+    });
+
+    function escapeHtml(value) {
+        var div = document.createElement('div');
+        div.textContent = value == null ? '' : String(value);
+        return div.innerHTML;
+    }
+
+    function formatDate(value) {
+        if (!value) { return '—'; }
+        var date = new Date(value);
+        return isNaN(date.getTime()) ? String(value) : date.toLocaleString();
+    }
+
+    var skillsById = {};
+
+    function loadSkills() {
+        fetch(app.dataset.dataEndpoint, { headers: headersForm() })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                if (!data.status) { renderError(data.msg); return; }
+                allSkills = data.skills || [];
+                options   = data.options || { categories: [], projects: [] };
+                renderSkills();
+            })
+            .catch(function (err) { renderError(err.message); });
+    }
+
+    function renderError(msg) {
+        emptyState.style.display = 'none';
+        list.innerHTML = '<div class="alert alert-danger m-md">' + escapeHtml(msg) + '</div>';
+    }
+
+    function renderSkills() {
+        skillsById = {};
+        allSkills.forEach(function (skill) { skillsById[skill.id] = skill; });
+
+        if (!allSkills.length) {
+            list.innerHTML = '';
+            emptyState.style.display = '';
+            return;
+        }
+
+        emptyState.style.display = 'none';
+
+        var skills = !filterTerm ? allSkills : allSkills.filter(function (skill) {
+            return (skill.name || '').toLowerCase().indexOf(filterTerm) !== -1 ||
+                (skill.description || '').toLowerCase().indexOf(filterTerm) !== -1;
+        });
+
+        if (!skills.length) {
+            list.innerHTML = '<p class="text-muted pa-md">{{ 'mautic.witty.skill.filter_empty'|trans|e('js') }}</p>';
+            return;
+        }
+
+        var rows = skills.map(function (skill) {
+            return '' +
+                '<tr>' +
+                    '<td><a href="#" data-action="edit" data-id="' + skill.id + '">' + escapeHtml(skill.name) + '</a></td>' +
+                    '<td class="witty-skill-description">' + escapeHtml(skill.description) + '</td>' +
+                    '<td>' + escapeHtml(skill.categoryTitle || '{{ 'mautic.core.form.uncategorized'|trans|e('js') }}') + '</td>' +
+                    '<td>' + (skill.tokens || 0).toLocaleString() + ' {{ 'mautic.witty.skill.stats_tokens_unit'|trans|e('js') }}</td>' +
+                    '<td>' + escapeHtml(skill.createdBy || '—') + '</td>' +
+                    '<td>' + formatDate(skill.dateModified) + '</td>' +
+                    '<td>' + skill.id + '</td>' +
+                    '<td class="text-right">' +
+                        '<div class="btn-group">' +
+                            '<button type="button" class="btn btn-ghost btn-nospin" size="sm" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">' +
+                                '<i class="ri-more-2-line" aria-hidden="true"></i>' +
+                            '</button>' +
+                            '<ul class="dropdown-menu dropdown-menu-right" role="menu">' +
+                                '<li><a href="#" data-action="edit" data-id="' + skill.id + '"><i class="ri-edit-line"></i> {{ 'mautic.core.form.edit'|trans|e('js') }}</a></li>' +
+                                '<li><a href="#" data-action="delete" data-id="' + skill.id + '"><i class="ri-delete-bin-line"></i> {{ 'mautic.core.form.delete'|trans|e('js') }}</a></li>' +
+                            '</ul>' +
+                        '</div>' +
+                    '</td>' +
+                '</tr>';
+        }).join('');
+
+        list.innerHTML =
+            '<div class="table-responsive">' +
+                '<table class="table table-hover witty-skill-table">' +
+                    '<thead><tr>' +
+                        '<th>{{ 'mautic.witty.skill.name'|trans|e('js') }}</th>' +
+                        '<th>{{ 'mautic.witty.skill.description'|trans|e('js') }}</th>' +
+                        '<th>{{ 'mautic.core.category'|trans|e('js') }}</th>' +
+                        '<th>{{ 'mautic.witty.skill.stats'|trans|e('js') }}</th>' +
+                        '<th>{{ 'mautic.core.createdby'|trans|e('js') }}</th>' +
+                        '<th>{{ 'mautic.core.date.modified'|trans|default('Modified')|e('js') }}</th>' +
+                        '<th>ID</th>' +
+                        '<th></th>' +
+                    '</tr></thead>' +
+                    '<tbody>' + rows + '</tbody>' +
+                '</table>' +
+            '</div>';
+
+        list.querySelectorAll('[data-action="edit"]').forEach(function (el) {
+            el.addEventListener('click', function (event) { event.preventDefault(); openForm(skillsById[el.dataset.id]); });
+        });
+        list.querySelectorAll('[data-action="delete"]').forEach(function (el) {
+            el.addEventListener('click', function (event) { event.preventDefault(); deleteSkill(el.dataset.id); });
+        });
+    }
+
+    function openForm(skill) {
+        skill = skill || { id: '', name: '', description: '', content: '', category: null, projects: [] };
+
+        var selectedProjectIds = (skill.projects || []).map(function (p) { return String(p.id); });
+        var categoryModalHeader = '{{ 'mautic.category.header.new'|trans|e('js') }}';
+
+        var categoryOptions = '<option value="">{{ 'mautic.core.form.uncategorized'|trans|e('js') }}</option>' +
+            options.categories.map(function (c) {
+                return '<option value="' + c.id + '"' + (skill.category === c.id ? ' selected' : '') + '>' + escapeHtml(c.title) + '</option>';
+            }).join('') +
+            '<option value="new">{{ 'mautic.category.createnew'|trans|e('js') }}</option>';
+
+        var projectOptions = options.projects.map(function (p) {
+            return '<option value="' + p.id + '"' + (selectedProjectIds.indexOf(String(p.id)) !== -1 ? ' selected' : '') + '>' + escapeHtml(p.name) + '</option>';
+        }).join('');
+
+        openModal(
+            '<div class="witty-skill-modal-body">' +
+                '<h2>' + (skill.id ? '{{ 'mautic.witty.skill.edit'|trans|e('js') }}' : '{{ 'mautic.witty.skill.create'|trans|e('js') }}') + '</h2>' +
+                '<div class="form-group"><label>{{ 'mautic.witty.skill.name'|trans|e('js') }}</label>' +
+                    '<input type="text" id="witty-skill-name" class="form-control" value="' + escapeHtml(skill.name) + '"></div>' +
+                '<div class="form-group"><label>{{ 'mautic.witty.skill.description'|trans|e('js') }}</label>' +
+                    '<input type="text" id="witty-skill-description" class="form-control" value="' + escapeHtml(skill.description) + '" placeholder="{{ 'mautic.witty.skill.description_placeholder'|trans|e('js') }}"></div>' +
+                '<div class="form-row">' +
+                    '<div class="form-group"><label for="witty-skill-category">{{ 'mautic.core.category'|trans|e('js') }}</label>' +
+                        '<div class="choice-wrapper">' +
+                            '<select id="witty-skill-category" name="category" class="form-control category-select" autocomplete="false">' +
+                                categoryOptions +
+                            '</select>' +
+                        '</div>' +
+                    '</div>' +
+                    '<div class="form-group"><label for="witty-skill-projects">{{ 'project.menu.index'|trans|default('Projects')|e('js') }}</label>' +
+                        '<div class="choice-wrapper">' +
+                            '<select id="witty-skill-projects" name="projects[]" autocomplete="false" multiple="multiple"' +
+                                ' data-placeholder="{{ 'mautic.project.select_or_create'|trans|e('js') }}"' +
+                                ' data-action="createProject"' +
+                                ' data-no-results-text="{{ 'mautic.project.enter_to_create'|trans|e('js') }}"' +
+                                ' data-allow-add="true">' +
+                                projectOptions +
+                            '</select>' +
+                        '</div>' +
+                    '</div>' +
+                '</div>' +
+                '<div class="form-group">' +
+                    '<label>{{ 'mautic.witty.skill.content'|trans|e('js') }}</label>' +
+                    '<div class="witty-skill-import-row">' +
+                        '<input type="file" id="witty-skill-import" accept=".md,text/markdown,text/plain">' +
+                        '<span class="text-muted">{{ 'mautic.witty.skill.import_hint'|trans|e('js') }}</span>' +
+                    '</div>' +
+                    '<textarea id="witty-skill-content" class="form-control">' + escapeHtml(skill.content) + '</textarea>' +
+                '</div>' +
+            '</div>' +
+            '<div class="witty-skill-modal-footer">' +
+                '<button class="btn btn-primary" id="witty-skill-submit" type="button"><i class="ri-check-line"></i> <span>{{ 'mautic.core.form.save'|trans|e('js') }}</span></button>' +
+                '<button class="btn btn-secondary" id="witty-skill-cancel" type="button"><i class="ri-close-line"></i> <span>{{ 'mautic.core.form.cancel'|trans|e('js') }}</span></button>' +
+            '</div>'
+        );
+
+        document.getElementById('witty-skill-cancel').addEventListener('click', closeModal);
+
+        var categorySelect = document.getElementById('witty-skill-category');
+        categorySelect.addEventListener('change', function () {
+            Mautic.loadAjaxModalBySelectValue(categorySelect, 'new', app.dataset.categoryNewUrl, categoryModalHeader);
+        });
+        if (window.Mautic && typeof Mautic.activateChosenSelect === 'function') {
+            Mautic.activateChosenSelect(categorySelect);
+            Mautic.activateChosenSelect(document.getElementById('witty-skill-projects'));
+        }
+
+        document.getElementById('witty-skill-import').addEventListener('change', function (event) {
+            var file = event.target.files[0];
+            if (!file) { return; }
+
+            var reader = new FileReader();
+            reader.onload = function () {
+                document.getElementById('witty-skill-content').value = String(reader.result || '');
+                // Un import ne doit pas ecraser un nom deja saisi a la main.
+                var nameField = document.getElementById('witty-skill-name');
+                if (!nameField.value.trim()) {
+                    nameField.value = file.name.replace(/\.md$/i, '');
+                }
+            };
+            reader.readAsText(file);
+        });
+
+        document.getElementById('witty-skill-submit').addEventListener('click', function () {
+            var name = document.getElementById('witty-skill-name').value.trim();
+            var description = document.getElementById('witty-skill-description').value.trim();
+            var content = document.getElementById('witty-skill-content').value;
+            var categoryId = document.getElementById('witty-skill-category').value;
+            var projectIds = Array.prototype.map.call(
+                document.getElementById('witty-skill-projects').selectedOptions,
+                function (opt) { return opt.value; }
+            );
+
+            if (!name) { window.alert('{{ 'mautic.witty.skill.name'|trans|e('js') }}'); return; }
+            if (!content.trim()) { window.alert('{{ 'mautic.witty.skill.content'|trans|e('js') }}'); return; }
+
+            fetch(app.dataset.saveEndpoint, {
+                method: 'POST',
+                headers: headersForm(),
+                body: toForm({ id: skill.id || '', name: name, description: description, content: content, category_id: categoryId, project_ids: projectIds })
+            })
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                    if (!data.status) { window.alert(data.msg || 'Error'); return; }
+                    closeModal();
+                    loadSkills();
+                })
+                .catch(function (err) { window.alert(err.message); });
+        });
+    }
+
+    function deleteSkill(id) {
+        var skill = skillsById[id];
+        if (!window.confirm('{{ 'mautic.witty.skill.delete_confirm'|trans|e('js') }} (' + (skill ? skill.name : id) + ')')) { return; }
+
+        fetch(app.dataset.deleteEndpoint, { method: 'POST', headers: headersForm(), body: toForm({ id: id }) })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                if (!data.status) { window.alert(data.msg || 'Error'); return; }
+                loadSkills();
+            });
+    }
+
+    document.getElementById('witty-skill-create-btn').addEventListener('click', function () { openForm(null); });
+
+    filterInput.addEventListener('input', function () {
+        filterTerm = filterInput.value.trim().toLowerCase();
+        renderSkills();
+    });
+
+    loadSkills();
+})();
+</script>
+{% endblock %}

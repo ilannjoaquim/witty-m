@@ -34,7 +34,8 @@ class ManageTagsTool extends AbstractTool
     public function getDescription(): string
     {
         return 'Gere les tags de contacts. action=list pour lister les tags existants, '
-            .'action=apply pour ajouter et/ou retirer des tags sur un contact identifie par son id ou son email. '
+            .'action=apply pour ajouter et/ou retirer des tags sur un contact identifie par son id ou son email, '
+            .'action=delete pour supprimer definitivement un tag (le retire de tous les contacts). '
             .'Un tag inconnu est cree automatiquement lors de son affectation.';
     }
 
@@ -60,8 +61,8 @@ class ManageTagsTool extends AbstractTool
         return $this->schema([
             'action' => [
                 'type'        => 'string',
-                'enum'        => ['list', 'apply'],
-                'description' => 'list pour consulter, apply pour modifier les tags d un contact.',
+                'enum'        => ['list', 'apply', 'delete'],
+                'description' => 'list pour consulter, apply pour modifier les tags d un contact, delete pour supprimer un tag definitivement.',
             ],
             'contact_id'    => ['type' => 'integer', 'description' => 'Identifiant du contact, pour action=apply.'],
             'contact_email' => ['type' => 'string', 'description' => 'Alternative a contact_id.'],
@@ -75,6 +76,7 @@ class ManageTagsTool extends AbstractTool
                 'items'       => ['type' => 'string'],
                 'description' => 'Tags a retirer.',
             ],
+            'tag'   => ['type' => 'string', 'description' => 'Nom du tag a supprimer, pour action=delete.'],
             'limit' => ['type' => 'integer', 'description' => 'Nombre de tags listes (defaut 50).'],
         ], ['action']);
     }
@@ -87,8 +89,12 @@ class ManageTagsTool extends AbstractTool
             return $this->listTags(max(1, min(200, (int) ($arguments['limit'] ?? 50))));
         }
 
+        if ('delete' === $action) {
+            return $this->deleteTag(trim((string) ($arguments['tag'] ?? '')), $arguments);
+        }
+
         if ('apply' !== $action) {
-            return ['status' => 'error', 'error' => 'action doit valoir list ou apply.'];
+            return ['status' => 'error', 'error' => 'action doit valoir list, apply ou delete.'];
         }
 
         $add    = array_values(array_filter(array_map('strval', (array) ($arguments['add'] ?? []))));
@@ -124,6 +130,39 @@ class ManageTagsTool extends AbstractTool
             )),
             'url'   => '/s/contacts/view/'.$lead->getId(),
         ]);
+    }
+
+    /**
+     * @param array<string, mixed> $arguments
+     *
+     * @return array<string, mixed>
+     */
+    private function deleteTag(string $tag, array $arguments): array
+    {
+        if ('' === $tag) {
+            return ['status' => 'error', 'error' => 'tag est obligatoire pour action=delete.'];
+        }
+
+        $entity = $this->tagModel->getRepository()->findOneBy(['tag' => $tag]);
+
+        if (!$entity instanceof Tag) {
+            return ['status' => 'error', 'error' => sprintf('Tag introuvable : %s.', $tag)];
+        }
+
+        // Irreversible et retire le tag de tous les contacts qui le portent :
+        // confirmation exigee meme si le mode confirmation global est desactive.
+        if (true !== ($arguments['confirmed'] ?? false)) {
+            return $this->confirmationRequired([
+                'type'          => 'tag',
+                'tag'           => $tag,
+                'irreversible'  => true,
+                'avertissement' => 'Ce tag sera retire de tous les contacts qui le portent.',
+            ]);
+        }
+
+        $this->tagModel->deleteEntity($entity);
+
+        return $this->ok(['tag' => $tag, 'deleted' => true]);
     }
 
     /**

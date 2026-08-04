@@ -1,0 +1,885 @@
+{#
+  Webinar Landing Page -- theme Witty
+  Fichier autonome (doctype + head + style), utilise comme contenu de
+  depart quand ce theme est choisi pour une nouvelle landing page. Pas de
+  base.html.twig : builder=grapesjsbuilder uniquement, pas de rendu legacy.
+
+  Attention en editant : ce fichier passe par Twig. Une double accolade y
+  serait interpretee comme une variable Twig. Ce theme n'en a aucune : les
+  emplacements sont ecrits [ENTRE CROCHETS]. Le token de formulaire Mautic
+  ({form=...}) n'a qu'une accolade et traverse Twig sans dommage.
+#}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<!--
+════════════════════════════════════════════════════════════════════════════
+WEBINAR LANDING PAGE TEMPLATE
+Reusable for any niche, topic or speaker. Pairs with the day 0 and reminder
+email templates.
+════════════════════════════════════════════════════════════════════════════
+
+WHAT THIS PAGE IS FOR
+The email earns the click. This page earns the email address. Those are two
+different jobs, and the page has exactly one: get the form filled. Every
+element either moves someone toward the form or is dead weight.
+
+THE ONE RULE THAT BEATS ALL THE OTHERS: MESSAGE MATCH
+The headline here must echo the headline of the email that sent them. Not
+"similar in spirit" - the same core promise, ideally the same words. When
+the page says something different from the email, the visitor gets a half
+second of "wait, is this the right page?" and that half second is where
+conversions die. If you change the page headline, go change the email too.
+
+THE FIVE RULES
+1. NO NAVIGATION. No menu, no logo linking home, no footer links except
+   legal. Every exit is a lost registration. This template already has no
+   nav - do not add one.
+2. THE FORM IS ALWAYS REACHABLE. Sticky on desktop, sticky bar on mobile.
+   A visitor should never have to hunt for where to sign up.
+3. ASK FOR AS LITTLE AS POSSIBLE. Every extra form field costs registrations.
+   First name and email is the baseline. Only add a field if you will
+   actually use it to segment or to qualify.
+4. SPECIFICS BEAT ADJECTIVES. "30% of organic clicks" converts better than
+   "a huge shift". Numbers, dates, names, timeframes.
+5. WRITE FOR THE SCROLLER. Most visitors scan headings and bold text only.
+   Your H2s alone, read in sequence, should tell the whole story.
+
+HOW TO USE THIS FILE
+- Every block carries a WHY / HOW comment and [PLACEHOLDERS] in brackets.
+- Do not reorder the sections. The order is the argument:
+  who it is for → what changed → what to do → what it costs you to ignore
+  → what you get → who it is NOT for → who we are → sign up.
+- Search for "[" before publishing. Nothing in brackets should ship.
+- Search for "REPLACE" for the three technical values you must swap.
+════════════════════════════════════════════════════════════════════════════
+-->
+
+<title>[Page title, 50 to 60 chars: main promise + date. Shows in the browser tab and in Google]</title>
+<meta name="description" content="[Meta description, 140 to 155 chars. This is your ad copy in search results and the preview card when someone shares the link. Lead with the outcome, end with the date.]">
+
+<!-- Social share card. If you skip these, the link posted in Slack, LinkedIn
+     or WhatsApp shows up as a naked URL and gets ignored. The image must be
+     1200x630px. -->
+<meta property="og:title" content="[Same as the H1 below. Keep it consistent.]">
+<meta property="og:description" content="[One line: the outcome plus the date.]">
+<meta property="og:image" content="[Absolute URL to a 1200x630 image]">
+<meta property="og:type" content="website">
+
+<link href="https://fonts.googleapis.com/css2?family=Poppins:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;0,900;1,300&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+
+<style>
+  /* ══════════════════════════════════════════════════════════════════════
+     DESIGN TOKENS
+     Everything visual is defined once, here. To rebrand this page for a
+     different topic or client, you should only ever need to touch this
+     block. Never hardcode a hex value further down.
+     ══════════════════════════════════════════════════════════════════════ */
+  :root {
+    /* Colour */
+    --ink:        #0a0a0a;   /* near black: headings, dark panels        */
+    --ink-deep:   #080808;   /* hero and footer, a touch darker          */
+    --body:       #3a3a3a;   /* body copy: never pure black, it fatigues */
+    --muted:      #666666;   /* captions, secondary text                 */
+    --paper:      #f5f4f0;   /* warm page background                     */
+    --card:       #ffffff;   /* raised surfaces                          */
+    --line:       #e0ddd6;   /* borders and rules                        */
+    --line-soft:  #e8e6e0;
+    --accent:     #FF3D2E;   /* ONE accent, used sparingly. See note.    */
+    --accent-dk:  #e0321f;
+
+    /* Spacing scale. Pick from this list, never invent a value.
+       Consistent rhythm is most of what makes a page feel designed. */
+    --s1: 8px;   --s2: 12px;  --s3: 16px;  --s4: 20px;
+    --s5: 24px;  --s6: 32px;  --s7: 40px;  --s8: 56px;  --s9: 80px;
+
+    /* Vertical gap between major content blocks, tightened on small screens
+       by the media query at the bottom. */
+    --block: var(--s8);
+    --radius: 4px;
+  }
+
+  /* ACCENT DISCIPLINE, and this is the part most people get wrong:
+     the accent colour appears on the submit button, the small labels, the
+     pillar edges and the live dots. That is it. The moment you also make a
+     heading, a link and a box red, nothing is emphasised any more and the
+     eye stops knowing where to go. One loud colour, used four times, is what
+     makes the button unmissable. */
+
+  *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+  html { scroll-behavior:smooth; overflow-x:clip; width:100%; }
+  body { overflow-x:clip; width:100%; }
+  img { max-width:100%; height:auto; display:block; }
+
+  body {
+    font-family:'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    line-height:1.6;
+    color:var(--ink);
+    background:var(--paper);
+    min-height:100vh;
+  }
+
+  /* Quality floor: visible keyboard focus and motion that can be switched
+     off. Costs nothing, and a page that traps keyboard users is a page that
+     loses registrations. */
+  a:focus-visible, button:focus-visible, input:focus-visible,
+  select:focus-visible, textarea:focus-visible {
+    outline:2px solid var(--accent);
+    outline-offset:2px;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation:none !important; transition:none !important; }
+    html { scroll-behavior:auto; }
+  }
+
+  /* ── MOBILE STICKY BAR ─────────────────────────────────────────────── */
+  .mobile-topbar {
+    display:none;
+    background:var(--ink);
+    border-bottom:1px solid #1f1f1f;
+    padding:10px 18px;
+    align-items:center;
+    justify-content:space-between;
+    position:sticky; top:0; z-index:99;
+  }
+  .mobile-topbar-text { color:rgba(255,255,255,0.55); font-size:12px; letter-spacing:0.4px; }
+  .mobile-topbar-btn {
+    background:var(--accent); color:#fff; text-decoration:none;
+    padding:8px 18px; font-size:11px; font-weight:700;
+    letter-spacing:1.2px; text-transform:uppercase;
+    font-family:'Poppins', sans-serif; white-space:nowrap;
+    border-radius:2px; transition:opacity 0.15s;
+  }
+  .mobile-topbar-btn:hover { opacity:0.85; }
+  @media (max-width:1100px) { .mobile-topbar { display:flex; } }
+
+  /* ── HERO ──────────────────────────────────────────────────────────── */
+  .hero {
+    background:var(--ink-deep); color:#fff;
+    padding:var(--s9) var(--s5) 100px;
+    text-align:center; position:relative; overflow:hidden;
+  }
+  .hero::before {
+    content:''; position:absolute; inset:0; pointer-events:none;
+    background:
+      radial-gradient(ellipse 80% 60% at 50% 110%, rgba(255,61,46,0.28) 0%, transparent 65%),
+      radial-gradient(ellipse 50% 40% at 80% 20%, rgba(255,100,30,0.10) 0%, transparent 60%);
+  }
+  .hero-noise {
+    position:absolute; inset:0; opacity:0.03; pointer-events:none;
+    background-image:url("data:image/svg+xml,<svg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+    background-size:200px;
+  }
+  .hero-content { max-width:860px; margin:0 auto; position:relative; z-index:1; }
+  .hero-eyebrow {
+    display:inline-flex; align-items:center; gap:var(--s1);
+    font-size:11px; letter-spacing:2.5px; text-transform:uppercase;
+    color:rgba(255,255,255,0.45); font-weight:500;
+    margin-bottom:var(--s6); font-family:'Poppins', sans-serif;
+    position:relative; z-index:1;
+  }
+  .eyebrow-dot {
+    width:6px; height:6px; border-radius:50%;
+    background:var(--accent); display:inline-block;
+    animation:pulse 2s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%,100% { opacity:1; transform:scale(1); }
+    50% { opacity:0.5; transform:scale(0.7); }
+  }
+  .hero-logo {
+    height:52px; width:auto; margin:0 auto var(--s7);
+    position:relative; z-index:1; opacity:0.92;
+  }
+  .hero h1 {
+    font-family:'Poppins', sans-serif; font-size:80px; font-weight:900;
+    line-height:1.0; letter-spacing:-3px; margin-bottom:var(--s6); color:#fff;
+  }
+  .hero h1 em {
+    font-style:italic; font-weight:300; letter-spacing:-2px;
+    background:linear-gradient(110deg, #FF8C60 10%, var(--accent) 60%);
+    -webkit-background-clip:text; background-clip:text;
+    -webkit-text-fill-color:transparent;
+  }
+  .hero-sub {
+    font-size:19px; color:rgba(255,255,255,0.55); font-weight:300;
+    max-width:500px; margin:0 auto var(--s7); line-height:1.65;
+  }
+  .hero-date {
+    display:inline-block; border:1px solid rgba(255,255,255,0.15);
+    background:rgba(255,255,255,0.04); padding:var(--s2) 28px;
+    border-radius:2px; backdrop-filter:blur(4px);
+  }
+  .hero-date p {
+    font-size:11px; font-weight:600; color:rgba(255,255,255,0.6);
+    letter-spacing:2px; text-transform:uppercase;
+    font-family:'Poppins', sans-serif; margin:0;
+  }
+  .hero-scroll-indicator {
+    position:absolute; bottom:var(--s5); left:50%;
+    transform:translateX(-50%); z-index:1;
+  }
+  .hero-scroll-indicator span {
+    display:block; width:1px; height:40px; margin:0 auto;
+    background:linear-gradient(to bottom, rgba(255,255,255,0.4), transparent);
+    animation:scrollline 2s ease-in-out infinite;
+  }
+  @keyframes scrollline {
+    0%,100% { opacity:0; transform:scaleY(0); transform-origin:top; }
+    30%,70% { opacity:1; transform:scaleY(1); }
+  }
+
+  /* ── OPTIONAL STATS BAR ────────────────────────────────────────────── */
+  .stats-bar {
+    background:var(--ink); display:flex; align-items:center;
+    justify-content:center; padding:28px var(--s7);
+    border-bottom:1px solid #1a1a1a;
+  }
+  .stat { display:flex; flex-direction:column; align-items:center; gap:4px; padding:0 48px; }
+  .stat-n {
+    font-family:'Poppins', sans-serif; font-size:28px; font-weight:800;
+    color:var(--accent); letter-spacing:-1px;
+  }
+  .stat-l {
+    font-size:11px; color:rgba(255,255,255,0.4); text-transform:uppercase;
+    letter-spacing:1px; font-weight:500; text-align:center; max-width:140px;
+  }
+  .stat-divider { width:1px; height:40px; background:rgba(255,255,255,0.08); flex-shrink:0; }
+
+  /* ── LAYOUT ────────────────────────────────────────────────────────── */
+  .container {
+    display:grid; grid-template-columns:1fr 400px;
+    max-width:1320px; margin:0 auto;
+    padding:var(--s9) var(--s7); align-items:start;
+  }
+  .content { padding-right:64px; min-width:0; }
+  .content h2 {
+    font-family:'Poppins', sans-serif; font-size:32px; font-weight:800;
+    color:var(--ink); letter-spacing:-1px; line-height:1.2;
+    margin:var(--s8) 0 var(--s4); overflow-wrap:break-word;
+  }
+  .content h2:first-child { margin-top:0; }
+  .content p {
+    margin-bottom:var(--s4); line-height:1.85; font-size:16px;
+    color:var(--body); font-weight:400;
+  }
+  .content p:last-child { margin-bottom:0; }
+  .section-divider { border-top:1px solid var(--line); margin:var(--block) 0; }
+
+  /* ── PILLARS ───────────────────────────────────────────────────────── */
+  .pillars { list-style:none; margin:var(--s6) 0; display:flex; flex-direction:column; gap:var(--s3); }
+  .pillars li {
+    background:var(--card); border:1px solid var(--line-soft);
+    border-left:3px solid var(--accent);
+    padding:var(--s4) var(--s5); border-radius:0 var(--radius) var(--radius) 0;
+  }
+  .pillars li p { margin:6px 0 0; font-size:15px; color:#555; }
+  .pillar-tag {
+    font-family:'Poppins', sans-serif; font-size:12px; font-weight:700;
+    letter-spacing:1.5px; text-transform:uppercase; color:var(--ink);
+  }
+
+  /* ── HIGHLIGHT ─────────────────────────────────────────────────────── */
+  .highlight {
+    background:var(--card); border:1px solid var(--line-soft);
+    border-left:3px solid var(--ink);
+    padding:28px var(--s6); margin:var(--s7) 0;
+    border-radius:0 var(--radius) var(--radius) 0;
+    font-size:15px; color:#444; line-height:1.8;
+  }
+  .highlight strong {
+    display:block; margin-bottom:10px; color:var(--ink);
+    font-family:'Poppins', sans-serif; font-weight:700;
+    font-size:16px; letter-spacing:-0.3px;
+  }
+
+  /* ── DARK PANELS: gift and warning share a base ────────────────────── */
+  .panel {
+    background:var(--ink); color:#fff;
+    padding:var(--s7) 44px; margin:var(--s7) 0;
+  }
+  .panel-gift    { border-left:3px solid var(--accent); border-radius:0 var(--radius) var(--radius) 0; }
+  .panel-warning { border-top:3px solid var(--accent);  border-radius:0 0 var(--radius) var(--radius); }
+  .panel-label {
+    font-family:'Poppins', sans-serif; font-size:10px; font-weight:700;
+    letter-spacing:2.5px; text-transform:uppercase;
+    color:var(--accent); margin-bottom:14px;
+  }
+  .panel h3 {
+    font-family:'Poppins', sans-serif; font-size:24px; font-weight:800;
+    letter-spacing:-0.5px; line-height:1.25; color:#fff; margin-bottom:var(--s3);
+  }
+  .panel p { color:rgba(255,255,255,0.65); font-size:15px; line-height:1.8; margin-bottom:var(--s2); }
+  .panel p:last-child { margin-bottom:0; }
+  .panel-note {
+    border-left:2px solid rgba(255,255,255,0.2);
+    padding:14px 18px; margin-top:var(--s4);
+    font-size:14px; color:rgba(255,255,255,0.5); font-style:italic;
+  }
+  .panel-lead-in { margin-top:var(--s4); font-weight:600; color:rgba(255,255,255,0.9); }
+  .panel ul { list-style:none; margin-top:14px; }
+  .panel li { padding:6px 0; color:rgba(255,255,255,0.7); font-size:15px; line-height:1.7; }
+
+  /* ── SPEAKERS ──────────────────────────────────────────────────────── */
+  .speakers { display:flex; flex-direction:column; gap:var(--s4); margin:28px 0 var(--s5); }
+  .speaker-card {
+    display:flex; align-items:flex-start; gap:var(--s4);
+    background:var(--card); border:1px solid var(--line-soft);
+    padding:var(--s5) 28px; border-radius:var(--radius);
+  }
+  .speaker-photo {
+    width:72px; height:72px; border-radius:50%; object-fit:cover;
+    flex-shrink:0; border:2px solid var(--line);
+  }
+  .speaker-info { flex:1; min-width:0; }
+  .speaker-card h4 {
+    font-family:'Poppins', sans-serif; font-weight:700; font-size:17px;
+    color:var(--ink); margin-bottom:3px; letter-spacing:-0.2px;
+  }
+  .speaker-role {
+    font-family:'Poppins', sans-serif; font-size:11px; font-weight:600;
+    text-transform:uppercase; letter-spacing:1.2px;
+    color:var(--accent); margin-bottom:10px;
+  }
+  .speaker-card p { font-size:14px; line-height:1.7; color:var(--muted); margin:0; }
+  .client-logo-wrap { margin-top:var(--s6); padding-top:28px; border-top:1px solid var(--line); }
+  .client-logo-wrap img { opacity:0.75; }
+  .speakers-footer { font-size:14px; color:#888; margin-top:var(--s2); line-height:1.7; font-style:italic; }
+
+  /* ── FORM COLUMN ───────────────────────────────────────────────────── */
+  .form-column { position:sticky; top:var(--s5); height:fit-content; min-width:0; align-self:start; }
+  .form-box {
+    background:var(--card); border:1px solid var(--line);
+    border-radius:6px; overflow:hidden;
+    box-shadow:0 4px 32px rgba(0,0,0,0.06), 0 1px 4px rgba(0,0,0,0.04);
+  }
+  .form-box-header {
+    background:var(--ink); padding:28px var(--s6) var(--s5);
+    border-bottom:3px solid var(--accent);
+  }
+  .form-live-badge {
+    display:inline-flex; align-items:center; gap:7px;
+    font-family:'Poppins', sans-serif; font-size:10px; font-weight:700;
+    letter-spacing:2px; text-transform:uppercase;
+    color:rgba(255,255,255,0.5); margin-bottom:var(--s2);
+  }
+  .form-live-badge span {
+    width:6px; height:6px; border-radius:50%;
+    background:var(--accent); animation:pulse 2s ease-in-out infinite;
+  }
+  .form-box-header h3 {
+    font-family:'Poppins', sans-serif; font-size:24px; font-weight:800;
+    color:#fff; letter-spacing:-0.5px; margin-bottom:6px;
+  }
+  .form-box .subtitle { color:rgba(255,255,255,0.4); font-size:13px; font-style:italic; margin:0; }
+  .form-embed { padding:28px var(--s6) var(--s6); }
+
+  /* ── MAUTIC FORM SKIN ──────────────────────────────────────────────────
+     Selectors are scoped to .form-embed rather than to a form id, so this
+     works with ANY Mautic form you drop in. Swap the form, keep the design. */
+  .form-embed form { display:block; }
+  .form-embed .mauticform-innerform { padding:0; }
+  .form-embed .mauticform-field-wrapper { margin-bottom:18px; }
+  .form-embed .mauticform-label {
+    display:block; margin-bottom:var(--s1);
+    font-family:'Poppins', sans-serif; font-weight:600;
+    color:var(--ink); font-size:11px;
+    letter-spacing:0.8px; text-transform:uppercase;
+  }
+  .form-embed input[type="text"],
+  .form-embed input[type="email"],
+  .form-embed input[type="tel"],
+  .form-embed textarea,
+  .form-embed select {
+    width:100%; padding:13px var(--s3);
+    border:1px solid var(--line); border-radius:var(--radius);
+    font-family:'Inter', sans-serif; font-size:15px; color:var(--ink);
+    background:#fafaf8; box-sizing:border-box; transition:border-color 0.15s;
+  }
+  .form-embed input[type="text"]:focus,
+  .form-embed input[type="email"]:focus,
+  .form-embed input[type="tel"]:focus,
+  .form-embed textarea:focus,
+  .form-embed select:focus {
+    outline:none; border-color:var(--ink); background:#fff;
+  }
+  .form-embed button[type="submit"],
+  .form-embed input[type="submit"] {
+    width:100%; padding:var(--s3);
+    background:var(--accent); color:#fff; border:none;
+    border-radius:var(--radius);
+    font-family:'Poppins', sans-serif; font-size:12px; font-weight:700;
+    letter-spacing:1.5px; text-transform:uppercase;
+    cursor:pointer; margin-top:var(--s1);
+    transition:background 0.15s, transform 0.1s;
+  }
+  .form-embed button[type="submit"]:hover,
+  .form-embed input[type="submit"]:hover {
+    background:var(--accent-dk); transform:translateY(-1px);
+  }
+  .form-embed .mauticform-checkbox { display:flex; align-items:flex-start; }
+  .form-embed .mauticform-checkboxes input[type="checkbox"] {
+    width:auto; margin-right:10px; cursor:pointer; flex-shrink:0;
+  }
+  .form-privacy {
+    font-size:12px; color:#999; line-height:1.6;
+    margin-top:var(--s3); text-align:center;
+  }
+
+  /* ── FOOTER ────────────────────────────────────────────────────────── */
+  .footer {
+    background:var(--ink-deep); padding:52px var(--s4);
+    text-align:center; font-size:13px;
+    color:rgba(255,255,255,0.3); border-top:1px solid #1a1a1a;
+  }
+  .footer img { height:36px; width:auto; opacity:0.6; margin:0 auto var(--s4); }
+  .footer p { margin-bottom:var(--s1); }
+  .footer-legal { margin-top:var(--s2); }
+  .footer a { color:rgba(255,255,255,0.4); text-decoration:none; transition:color 0.15s; }
+  .footer a:hover { color:var(--accent); }
+
+  /* ── RESPONSIVE ────────────────────────────────────────────────────── */
+  @media (max-width:1100px) {
+    .container { grid-template-columns:1fr; padding:var(--s9) 28px; }
+    .content { padding-right:0; padding-bottom:48px; border-bottom:1px solid var(--line); }
+    .form-column { position:static; margin-top:48px; }
+  }
+  @media (max-width:768px) {
+    :root { --block: var(--s7); }
+    .hero { padding:70px var(--s4) var(--s9); }
+    .hero h1 { font-size:52px; letter-spacing:-2px; }
+    .hero-sub { font-size:16px; }
+    .stats-bar { flex-direction:column; gap:var(--s5); padding:var(--s6) var(--s4); }
+    .stat { padding:0; }
+    .stat-divider { display:none; }
+    .container { padding:48px var(--s4); }
+    .content h2 { font-size:26px; margin-top:var(--s7); }
+    .panel { padding:28px var(--s5); }
+    .form-box-header { padding:22px var(--s5) var(--s4); }
+    .form-embed { padding:22px var(--s5) var(--s5); }
+  }
+  @media (max-width:480px) {
+    .hero h1 { font-size:40px; letter-spacing:-1.5px; }
+    .speaker-card { flex-direction:column; align-items:center; text-align:center; }
+    .speaker-photo { margin:0 auto; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════════════════════
+     1. MOBILE STICKY BAR
+     WHY: on mobile the form sits far below the fold, so at any moment the
+     visitor can be several thumb flicks away from converting. This bar keeps
+     one tap between "convinced" and "registered", permanently. On a long
+     page it is often the single highest impact element on mobile.
+     HOW: date on the left as a quiet reminder that this is time bound, one
+     action on the right. The link jumps to the form anchor. Keep the label
+     under four words or it wraps on small phones.
+     ═══════════════════════════════════════════════════════════════════════ -->
+<div class="mobile-topbar">
+  <span class="mobile-topbar-text">📅 [DATE] · [TIME]</span>
+  <a href="#register" class="mobile-topbar-btn">[2 words. Ex. "Sign up"] →</a>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════
+     2. HERO
+     The visitor decides in about three seconds whether to stay. The hero has
+     to answer three questions in that window: what is this, is it for me,
+     and when is it. Nothing else belongs here.
+     ═══════════════════════════════════════════════════════════════════════ -->
+<div class="hero">
+  <div class="hero-noise"></div>
+  <div class="hero-content">
+
+    <!-- 2a. EYEBROW
+         WHY: it categorises the page before the headline lands. "Premium
+         Webinar · 30 July" tells the reader this is a live event with a date,
+         not a downloadable PDF or a sales page. Framing it as an event raises
+         perceived value and makes the date feel like a real constraint.
+         The pulsing dot signals "live" without a word.
+         HOW: format is [category] · [date]. Keep it under 40 characters. -->
+    <div class="hero-eyebrow">
+      <span class="eyebrow-dot"></span>
+      [CATEGORY] · [DATE]
+    </div>
+
+    <!-- 2b. LOGO
+         WHY: the only trust signal above the headline. It answers "who is
+         talking to me" instantly and reassures anyone who arrived from an ad.
+         HOW: white or transparent version, roughly 52px tall. Do NOT link it
+         anywhere. A clickable logo on a landing page is an exit door. -->
+    <img class="hero-logo" src="[URL to white logo]" alt="[Brand name]">
+
+    <!-- 2c. HEADLINE
+         WHY: this is the page. It must repeat the promise from the email that
+         brought them here (see MESSAGE MATCH at the top of this file).
+         HOW: two to five words, split across two lines, with the second half
+         in <em> to pick up the gradient. Short and declarative beats clever
+         and long, because at 80px there is no room for a sentence.
+         Patterns that work:
+           • Transformation  — "From Zero / to the Top"
+           • Before / after  — "Invisible / to Cited"
+           • The stake       — "Own the / Answer"
+         The <em> should carry the DESIRABLE half. The eye lands on the
+         gradient first, so put the outcome there, not the starting point.
+         BANNED: the topic as a title ("SEO Webinar 2026"), the format as a
+         title ("Free Live Training"). Neither promises anything. -->
+    <h1>[Word one]<br><em>[the desirable half]</em></h1>
+
+    <!-- 2d. SUBHEADLINE
+         WHY: the H1 is emotional and vague by design. This line makes it
+         concrete and does the qualifying: the right person reads it and
+         thinks "that is my problem".
+         HOW: one sentence, 12 to 22 words. Name the topic, the year or
+         context, and the change they walk away with. Specific nouns only. -->
+    <p class="hero-sub">[SUBHEADLINE: topic + context + the change they leave with. One sentence.]</p>
+
+    <!-- 2e. DATE BADGE
+         WHY: pure logistics, and the number one silent objection is "am I
+         even free then". Answering it in the hero prevents the visitor from
+         scrolling the whole page only to bounce at the bottom.
+         HOW: day + date + time. Add the time zone if your audience spans
+         more than one. Re-check this every single time you reuse this page:
+         a stale date destroys credibility faster than bad copy. -->
+    <div class="hero-date">
+      <p>📅 [DAY, DATE] &nbsp;·&nbsp; [TIME + TIMEZONE]</p>
+    </div>
+  </div>
+  <div class="hero-scroll-indicator"><span></span></div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════
+     OPTIONAL: STATS BAR
+     Uncomment if you have three real, verifiable numbers. It sits between
+     the hero and the content as a credibility strip, and it works well when
+     your brand is unknown to the traffic source (cold ads, partner lists).
+     Leave it out if you would have to stretch to fill it. Three vague
+     numbers hurt more than no numbers.
+     Best three: people trained, clients served, years doing this.
+<div class="stats-bar">
+  <div class="stat"><div class="stat-n">[NUMBER]</div><div class="stat-l">[what it counts]</div></div>
+  <div class="stat-divider"></div>
+  <div class="stat"><div class="stat-n">[NUMBER]</div><div class="stat-l">[what it counts]</div></div>
+  <div class="stat-divider"></div>
+  <div class="stat"><div class="stat-n">[NUMBER]</div><div class="stat-l">[what it counts]</div></div>
+</div>
+     ═══════════════════════════════════════════════════════════════════════ -->
+
+<div class="container">
+
+  <!-- ═════════════════════════════════════════════════════════════════════
+       3. CONTENT COLUMN
+       Read your H2s in order, ignoring everything else. They should form a
+       coherent argument on their own, because for a large share of visitors
+       that is the entire page.
+       ═════════════════════════════════════════════════════════════════════ -->
+  <div class="content">
+
+    <!-- 3a. QUALIFYING QUESTION
+         WHY: opening with a question the right person answers "yes" to does
+         two things at once. It filters (the wrong audience self selects out,
+         which is good, they would not have shown up anyway) and it starts a
+         chain of small internal agreements. Someone who has silently said yes
+         to your first line is measurably more likely to say yes to your form.
+         HOW: a question, second person, describing their SITUATION not their
+         job title. "Do you run marketing on your own?" beats "Are you a
+         marketing manager?" because the first one describes how it feels. -->
+    <h2>[QUALIFYING QUESTION: describe their situation, not their job title.]</h2>
+
+    <!-- 3b. THE NEW REALITY
+         WHY: this paragraph creates the gap between what they are doing and
+         what now works. External, checkable data does the persuading so you
+         do not have to, and a number they have not seen before buys you
+         authority in one sentence.
+         HOW: one hard statistic with a source you could name if challenged,
+         then one blunt consequence sentence. Never invent a number: the one
+         visitor who checks it is usually the one you most wanted. -->
+    <p>[THE SHIFT: one verifiable statistic about what changed in your field, then one blunt sentence about what that makes obsolete.]</p>
+
+    <!-- 3c. THE METHOD HEADING plus SET UP
+         WHY: after the bad news, the visitor needs to know a path exists.
+         This heading names it and turns anxiety into curiosity.
+         HOW: name the method with a number or a timeframe in it. "The One
+         Hour Method" is memorable; "Our Approach" is not. The paragraph
+         underneath sets up the list that follows, so end it on a colon or a
+         promise of enumeration. -->
+    <h2>[NAME YOUR METHOD, ideally with a number or a timeframe in it]</h2>
+    <p>[SET UP: acknowledge the discipline is not dead, it changed. Then announce the three things their work now has to do.]</p>
+
+    <!-- 3d. THE THREE PILLARS
+         WHY: complexity is the real objection on a technical topic. Breaking
+         it into exactly three named blocks makes an overwhelming subject feel
+         handleable, and naming things is a status move: whoever names the
+         parts of a problem is assumed to have solved it.
+         Three is the number. Two looks thin, four or more stops being
+         memorable and starts feeling like a syllabus.
+         HOW: each pillar gets a short tag, ideally an acronym or a term with
+         a bit of insider weight, plus ONE line saying what winning at it
+         looks like. Describe the outcome, not the definition.
+         ❌ "AEO stands for Answer Engine Optimisation"
+         ✅ "Being the answer the engine pulls into position zero" -->
+    <ul class="pillars">
+      <li>
+        <div class="pillar-tag">[PILLAR 1 tag]</div>
+        <p>[What winning at it looks like. One line.]</p>
+      </li>
+      <li>
+        <div class="pillar-tag">[PILLAR 2 tag]</div>
+        <p>[What winning at it looks like. One line.]</p>
+      </li>
+      <li>
+        <div class="pillar-tag">[PILLAR 3 tag]</div>
+        <p>[What winning at it looks like. One line.]</p>
+      </li>
+    </ul>
+
+    <!-- 3e. THE DIAGNOSIS BOX
+         WHY: loss aversion. People move roughly twice as hard to avoid losing
+         something as to gain something, so this box states the cost of doing
+         nothing, in their terms. It also closes the pillars section with a
+         verdict instead of letting it trail off.
+         HOW: bold line = the verdict. Body = who takes what they lose if they
+         ignore it (a competitor, the platform, the AI). End on a line that
+         removes the option of postponing. Stay factual. Overstated fear
+         reads as manipulation and gets the tab closed. -->
+    <div class="highlight">
+      <strong>[VERDICT, 3 to 5 words. Ex. "The diagnosis is simple"]</strong>
+      [Who takes what they lose if they do nothing, and why postponing is not an option this time.]
+    </div>
+
+    <div class="section-divider"></div>
+
+    <!-- 3f. THE TIME OBJECTION, HANDLED
+         WHY: "I probably cannot make it live" is the biggest single leak on
+         any webinar page, and the fix is counterintuitive: promise the
+         recording. You will get materially more registrations, and a
+         registration is a lead whether or not they attend. The bonus block
+         right below is what pulls them into the live room, so you get both.
+         HOW: heading acknowledges their time is valuable. First line invites.
+         Second line removes the objection explicitly, in plain words. Do not
+         bury this: it is the reason a chunk of your list signs up at all. -->
+    <h2>[HEADING that respects their time. Ex. "Your Time Is Worth Money"]</h2>
+    <p><strong>[Invitation line, bold. Ex. "Claim your seat for an exclusive live session:"]</strong></p>
+    <p>[REMOVE THE OBJECTION: cannot attend live, register anyway, the recording lands in your inbox afterwards.]</p>
+
+    <!-- 3g. THE BONUS
+         WHY: two mechanisms stacked. Reciprocity, because receiving something
+         valuable creates an urge to reciprocate, here by signing up. And
+         attendance, because "live only" converts registrations into actual
+         attendees, which is the metric that decides whether the webinar was
+         worth running at all.
+         HOW:
+           • Name a real ASSET, not advice. A template, an audit, a script, a
+             swipe file, access to something. If it cannot be delivered as a
+             file or a link, it is not a bonus.
+           • Anchor its value. "Worth several hundred euros" makes free feel
+             expensive. Only use a number you could defend.
+           • State the live only condition in its own visual block, plainly.
+             If you say live only, you must MEAN it. Sending it to the
+             replay crowd anyway teaches your list that your constraints are
+             fake, and every future deadline you set gets ignored. -->
+    <div class="panel panel-gift">
+      <div class="panel-label">[LABEL. Ex. "Exclusive bonus"]</div>
+      <h3>[NAME THE ASSET]<br>[+ its value anchor. Ex. "Worth several hundred euros"]</h3>
+      <p>[What it is and what they can do with it immediately. Two lines maximum.]</p>
+      <div class="panel-note">[THE CONDITION: live attendees only, not available to replay viewers.]</div>
+    </div>
+
+    <div class="section-divider"></div>
+
+    <!-- 3h. THE DISQUALIFIER
+         WHY: the most counterintuitive block on the page and one of the most
+         effective. Telling people this is not for everyone raises perceived
+         value, filters out the tourists who inflate your registration count
+         and never show, and reads as confidence rather than need. A page that
+         wants everyone signals it is worth nothing.
+         It also works mechanically: the criteria list makes the right reader
+         tick three mental boxes in a row, arriving at the form already having
+         agreed with you three times.
+         HOW:
+           • Attack the category, not a competitor. "No pretty slides with
+             nothing behind them" targets bad webinars in general. Naming a
+             rival makes you look small and invites a fight you cannot win on
+             your own landing page.
+           • Then the criteria: three lines, all describing the READER, all
+             things your ideal registrant is proud to answer yes to. The third
+             one should be about willingness to change, because that is what
+             separates a buyer from a browser.
+         BANNED: insulting the reader. You are disqualifying a profile, never
+         mocking a person. -->
+    <div class="panel panel-warning">
+      <div class="panel-label">[LABEL. Ex. "Heads up"]</div>
+      <h3>[WHAT THIS IS NOT. Ex. "This is NOT a generic webinar."]</h3>
+      <p>[What you refuse to do, category level. No names.]</p>
+      <p>[What it is instead: a working session, concrete, immediately applicable.]</p>
+      <p class="panel-lead-in">[Lead in. Ex. "This only makes sense if:"]</p>
+      <ul>
+        <li>✓ &nbsp;[CRITERION 1: their role or situation]</li>
+        <li>✓ &nbsp;[CRITERION 2: this topic is a real growth lever for them]</li>
+        <li>✓ &nbsp;[CRITERION 3: they are willing to change their approach]</li>
+      </ul>
+    </div>
+
+    <div class="section-divider"></div>
+
+    <!-- 3i. SPEAKERS
+         WHY: people register for people. By this point the visitor is mostly
+         convinced by the argument and is asking the last question: who is
+         actually going to be talking, and why should I give them an hour.
+         Faces answer it faster than credentials.
+         HOW:
+           • Real photos, faces visible, looking at the camera. Not logos, not
+             avatars, not a group shot.
+           • The role line is years plus DOMAIN, not a job title. "10+ years
+             in marketing" outperforms "Chief Marketing Officer", because
+             seniority signals distance while experience signals help.
+           • The bio is two lines and must contain a RESULT they produced for
+             people like the reader. Not a career history, not a list of
+             tools. What changed for their clients.
+         ⚠ TECHNICAL: host the photos on your own server. The images in the
+         original version of this page pointed at LinkedIn CDN URLs carrying
+         an expiry parameter. Those links go dead within months and you get
+         broken images on your highest value page, usually without noticing. -->
+    <h2>[HEADING. Ex. "Speakers"]</h2>
+    <div class="speakers">
+      <div class="speaker-card">
+        <img class="speaker-photo" src="[URL to photo, hosted on YOUR domain, 400x400]" alt="[Full name]">
+        <div class="speaker-info">
+          <h4>[Full name]</h4>
+          <div class="speaker-role">[Years + domain. Ex. "10+ years in marketing"]</div>
+          <p>[Two lines. Must contain a result produced for people like the reader.]</p>
+        </div>
+      </div>
+      <div class="speaker-card">
+        <img class="speaker-photo" src="[URL to photo, hosted on YOUR domain, 400x400]" alt="[Full name]">
+        <div class="speaker-info">
+          <h4>[Full name]</h4>
+          <div class="speaker-role">[Years + domain]</div>
+          <p>[Two lines, with a concrete result.]</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- 3j. CLIENT PROOF
+         WHY: borrowed credibility, placed at the last moment before the eye
+         travels to the form. Recognisable logos transfer their trust to you
+         faster than any sentence you could write.
+         HOW: one strip of logos, greyed back so it supports rather than
+         shouts. The caption underneath converts the logos into a number:
+         logos say "real clients", the number says "at scale". Both, in that
+         order, is stronger than either alone.
+         ⚠ Only use logos you have permission to use. -->
+    <div class="client-logo-wrap">
+      <img src="[URL to client logo strip]" alt="[Brand] clients">
+      <p class="speakers-footer">[One line turning the logos into a number: how many clients trained or served, and what outcome you produced.]</p>
+    </div>
+  </div>
+
+  <!-- ═════════════════════════════════════════════════════════════════════
+       4. FORM COLUMN
+       WHY sticky: on desktop this panel stays in view for the entire scroll.
+       The visitor is never more than a glance from the action, and the form
+       is present at whichever moment happens to convince them, which is
+       different for every person. This is why the page has no separate CTA
+       buttons scattered through the copy: the form IS the persistent CTA.
+       ⚠ Do not let this box get taller than the viewport, or sticky breaks
+       and it scrolls away. That is the real reason to keep the fields few.
+       ═════════════════════════════════════════════════════════════════════ -->
+  <div class="form-column" id="register">
+    <div class="form-box">
+
+      <!-- 4a. FORM HEADER
+           WHY: the box needs to sell in three lines what the page spent
+           2,000 words on. The pulsing live badge signals a real event with
+           real people, which is what separates this from a PDF download.
+           HOW:
+             • Badge: one or two words. "Live".
+             • Heading: the ACTION as a benefit, second person. "Save your
+               seat" beats "Registration form" or "Sign up".
+             • Subtitle: one line of scarcity or exclusivity, and it must be
+               true. If seats are not actually limited, say something else
+               that is: "One session only, no repeat". -->
+      <div class="form-box-header">
+        <div class="form-live-badge"><span></span>[Ex. "Live"]</div>
+        <h3>[ACTION AS BENEFIT. Ex. "Save your seat"]</h3>
+        <div class="subtitle">[One true line of scarcity or exclusivity.]</div>
+      </div>
+
+      <!-- 4b. THE FORM ITSELF
+           WHY fields matter: every additional field measurably reduces
+           completions. On a free webinar you are trading conversion rate for
+           data, and on a first touch the trade is almost never worth it.
+             • 2 fields (first name, email) is the baseline.
+             • 3 or 4 is defensible if you genuinely segment by company or
+               role afterwards.
+             • 5+ means you are building a qualification form, not a
+               registration form. Do that on the call, not here.
+           HOW to swap forms: paste your own Mautic token below. The CSS in
+           this template is scoped to .form-embed, not to a form id, so any
+           form you drop in inherits the styling automatically.
+           REPLACE the number below with your own Mautic form id. -->
+      <div class="form-embed">
+        <span class="atwho-inserted" data-fr-verified="true">{form=REPLACE_FORM_ID}</span>
+
+        <!-- Privacy microcopy directly under the button. WHY: this is the
+             moment of hesitation, right as the cursor is over submit. One
+             short reassurance here recovers a slice of the people who would
+             otherwise stop. Keep it to one line and make it specific:
+             vague reassurance reads as evasive. -->
+        <p class="form-privacy">[Ex. "Your email is used for this session only. Unsubscribe in one click."]</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════
+     5. FOOTER
+     WHY: minimal by design. A landing page footer exists to satisfy the law
+     and the ad platforms, nothing else. Meta and Google both require a
+     reachable privacy policy on any page collecting data, and will reject or
+     pause ads pointing at a page without one.
+     HOW: logo, copyright, privacy policy, terms. That is the complete list.
+     Do not add "About us", "Blog", "Contact" or social icons. Every one of
+     them is a way out for someone who was about to fill in your form.
+     ═══════════════════════════════════════════════════════════════════════ -->
+<div class="footer">
+  <img src="[URL to white logo]" alt="[Brand name]">
+  <p>© [YEAR] [Brand name]. [Rights statement.]</p>
+  <p class="footer-legal">
+    <a href="[URL privacy policy]">Privacy Policy</a> &nbsp;·&nbsp;
+    <a href="[URL terms]">Terms of Service</a>
+  </p>
+</div>
+
+<!--
+════════════════════════════════════════════════════════════════════════════
+PRE LAUNCH CHECKLIST
+□ The H1 matches the promise in the email that sends traffic here.
+□ Every [BRACKET] replaced. Run a find on "[" across the whole file.
+□ Both "REPLACE" values swapped: form id, and the anchor if you renamed it.
+□ Date, day, time and time zone identical in the mobile bar, the hero badge
+  and the emails.
+□ All images hosted on your own domain. No LinkedIn, Drive or Dropbox URLs.
+□ Every image has real alt text.
+□ Form tested end to end: submit, confirmation, autoresponder, calendar
+  invite, and the contact actually landing in the right Mautic segment.
+□ The mobile bar link scrolls to the form. Test on a real phone.
+□ Page opened on a 375px wide screen: the H1 does not overflow, the form is
+  reachable, the submit button is thumb sized.
+□ Zero links out of the page except privacy policy and terms.
+□ Privacy policy live and reachable, or your ads get rejected.
+□ Tracking in place: page view, form submit as a conversion event.
+
+AFTER THE WEBINAR
+Do not delete this page. Replace the form with the replay, keep the URL. It
+keeps collecting registrations for the next session and keeps whatever SEO
+value the page accumulated.
+════════════════════════════════════════════════════════════════════════════
+-->
+
+</body>
+</html>

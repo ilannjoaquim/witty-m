@@ -1,0 +1,354 @@
+{
+    "key": "webinar-landing",
+    "name": "Webinar Landing Page (Opt-in)",
+    "description": "The page a visitor lands on to register for the webinar, before it happens. The email earns the click; this page earns the email address. Every element either moves someone toward the form or is dead weight. Pairs with the webinar-day0 and webinar (reminder) email templates: reuse the same headline, date and brand across all three.",
+    "language": "en",
+    "goal": "Get the registration form filled. The sticky form column is the only call to action on the page -- there are no buttons scattered through the copy.",
+    "rules": [
+        "Message match: the H1 must echo the headline of the email that sent the visitor here, ideally the same words. A visitor who feels 'is this the right page?' for even half a second is a visitor who leaves.",
+        "No navigation. No menu, no logo linking home, no footer links except legal. Every exit is a lost registration.",
+        "The form must always be reachable: sticky on desktop, a sticky bar on mobile. Never make a visitor hunt for where to sign up.",
+        "Ask for as little as possible. First name and email is the baseline; only add a field you will genuinely use to segment or qualify.",
+        "Specifics beat adjectives: '30% of organic clicks' converts better than 'a huge shift'. Numbers, dates, names, timeframes.",
+        "Write for the scroller: most visitors read only headings and bold text. The H2s in sequence should tell the whole story on their own.",
+        "Never invent a statistic, a client logo you do not have permission to use, or a scarcity claim that is not true. Any of those, once spotted, costs trust for every future page.",
+        "Host every image (logo, speaker photos, client logos) on your own domain. Third-party CDN URLs (e.g. LinkedIn) carry expiry parameters and go dead within months."
+    ],
+    "placeholders": [
+        {
+            "key": "LANG",
+            "default": "en"
+        },
+        {
+            "key": "PAGE_TITLE",
+            "label": "Browser tab / SEO title",
+            "guidance": "50 to 60 characters: main promise + date. Shown in the browser tab and in Google.",
+            "example": "Cold Outreach Live: The 2026 Method -- Mar 12"
+        },
+        {
+            "key": "META_DESCRIPTION",
+            "label": "Meta description",
+            "guidance": "140 to 155 characters. This is your ad copy in search results and the preview card when the link is shared. Lead with the outcome, end with the date.",
+            "example": "Learn the 3-message sequence that books 8 meetings a week, live on March 12. Free, 45 minutes, replay included."
+        },
+        {
+            "key": "OG_TITLE",
+            "label": "Social share title",
+            "guidance": "Same as the H1 (HERO_WORD_ONE + HERO_WORD_TWO combined). Keep it consistent with what the page actually says."
+        },
+        {
+            "key": "OG_DESCRIPTION",
+            "label": "Social share description",
+            "guidance": "One line: the outcome plus the date."
+        },
+        {
+            "key": "OG_IMAGE_URL",
+            "label": "Social share image",
+            "guidance": "Absolute URL to a 1200x630 image, hosted on your own domain."
+        },
+        {
+            "key": "MOBILE_BAR_DATE",
+            "label": "Mobile bar -- date",
+            "example": "Mar 12"
+        },
+        {
+            "key": "MOBILE_BAR_TIME",
+            "label": "Mobile bar -- time",
+            "example": "10:30 CET"
+        },
+        {
+            "key": "MOBILE_BAR_CTA",
+            "label": "Mobile bar -- CTA",
+            "guidance": "Under 4 words or it wraps on small phones.",
+            "default": "Sign up"
+        },
+        {
+            "key": "LOGO_URL",
+            "label": "Logo URL (white/transparent)",
+            "guidance": "Used in both the dark hero and the dark footer -- needs a white or transparent version, roughly 52px tall. Never link it anywhere: a clickable logo on a landing page is an exit door.",
+            "default": "https://placehold.co/360x120/000000/ffffff/png?text=YOUR+LOGO"
+        },
+        {
+            "key": "BRAND_NAME",
+            "label": "Brand name",
+            "guidance": "Used as logo alt text, in the client-logo alt text, and in the footer."
+        },
+        {
+            "key": "HERO_CATEGORY",
+            "label": "Hero eyebrow -- category",
+            "guidance": "Frames the page as a live event with a date, not a downloadable PDF. Keep the whole eyebrow line under 40 characters.",
+            "example": "Premium Webinar"
+        },
+        {
+            "key": "HERO_DATE_SHORT",
+            "label": "Hero eyebrow -- short date",
+            "example": "30 July"
+        },
+        {
+            "key": "HERO_WORD_ONE",
+            "label": "H1 -- first half",
+            "guidance": "Two to five words total across HERO_WORD_ONE and HERO_WORD_TWO, split across two lines. Must repeat the promise of the email that sent traffic here. Ban the topic as a title ('SEO Webinar 2026') or the format as a title ('Free Live Training') -- neither promises anything.",
+            "example": "From Zero"
+        },
+        {
+            "key": "HERO_WORD_TWO",
+            "label": "H1 -- second half (gradient, the desirable outcome)",
+            "guidance": "The eye lands on this gradient half first -- put the outcome here, not the starting point.",
+            "example": "to the Top"
+        },
+        {
+            "key": "HERO_SUBHEADLINE",
+            "label": "Hero subheadline",
+            "guidance": "One sentence, 12 to 22 words. The H1 is emotional and vague by design; this line makes it concrete. Name the topic, the year, and the change the reader leaves with.",
+            "example": "The exact outreach system we use to book 8 qualified meetings a week, without a bigger list or a bigger budget."
+        },
+        {
+            "key": "HERO_DATE_DAY",
+            "label": "Hero date badge -- day/date",
+            "example": "Thursday, 12 March"
+        },
+        {
+            "key": "HERO_DATE_TIME",
+            "label": "Hero date badge -- time/timezone",
+            "example": "10:30 CET"
+        },
+        {
+            "key": "QUALIFYING_QUESTION",
+            "label": "Opening question (H2)",
+            "guidance": "Second person, describes the reader's SITUATION, not their job title. 'Do you run marketing on your own?' beats 'Are you a marketing manager?' because the first describes how it feels. The wrong audience should self-select out here.",
+            "example": "Are you the only person handling outreach at your company?"
+        },
+        {
+            "key": "THE_SHIFT",
+            "label": "The new reality",
+            "guidance": "One hard, checkable statistic with a source you could name if challenged, then one blunt consequence sentence. Never invent the number.",
+            "example": "Cold email reply rates dropped 42% industry-wide after the 2026 inbox provider changes. Templates that worked last year now get filtered before they're read."
+        },
+        {
+            "key": "METHOD_NAME",
+            "label": "Method heading (H2)",
+            "guidance": "Name the method with a number or timeframe in it. 'The One Hour Method' is memorable; 'Our Approach' is not.",
+            "example": "The 3-Message System"
+        },
+        {
+            "key": "METHOD_SETUP",
+            "label": "Method setup paragraph",
+            "guidance": "Acknowledge the discipline is not dead, it changed. End on a colon or a promise of enumeration, to set up the three pillars below.",
+            "example": "Cold outreach still works. But it now has to do three things at once:"
+        },
+        {
+            "key": "PILLAR_1_TAG",
+            "label": "Pillar 1 -- tag",
+            "guidance": "A short tag, ideally an acronym or a term with insider weight."
+        },
+        {
+            "key": "PILLAR_1_LINE",
+            "label": "Pillar 1 -- one line",
+            "guidance": "What winning at it looks like, not the definition. 'Being the answer the engine pulls into position zero' beats 'AEO stands for Answer Engine Optimisation'."
+        },
+        {
+            "key": "PILLAR_2_TAG",
+            "label": "Pillar 2 -- tag"
+        },
+        {
+            "key": "PILLAR_2_LINE",
+            "label": "Pillar 2 -- one line"
+        },
+        {
+            "key": "PILLAR_3_TAG",
+            "label": "Pillar 3 -- tag"
+        },
+        {
+            "key": "PILLAR_3_LINE",
+            "label": "Pillar 3 -- one line"
+        },
+        {
+            "key": "VERDICT",
+            "label": "Diagnosis box -- verdict",
+            "guidance": "3 to 5 words, bold.",
+            "example": "The diagnosis is simple"
+        },
+        {
+            "key": "VERDICT_BODY",
+            "label": "Diagnosis box -- body",
+            "guidance": "Who takes what the reader loses if they do nothing (a competitor, the platform, the AI), and why postponing is not an option this time. Loss aversion moves people roughly twice as hard as the prospect of gain -- but stay factual, overstated fear reads as manipulation and gets the tab closed."
+        },
+        {
+            "key": "TIME_OBJECTION_HEADING",
+            "label": "Time objection heading (H2)",
+            "guidance": "Acknowledges the reader's time is valuable.",
+            "example": "Your Time Is Worth Money"
+        },
+        {
+            "key": "TIME_OBJECTION_INVITE",
+            "label": "Time objection -- invitation line",
+            "guidance": "Bold.",
+            "example": "Claim your seat for an exclusive live session:"
+        },
+        {
+            "key": "TIME_OBJECTION_ANSWER",
+            "label": "Time objection -- the answer",
+            "guidance": "Explicitly remove the objection: cannot attend live, register anyway, the recording lands in the inbox afterwards. 'I probably can't make it live' is the single biggest leak on a webinar page -- promising the recording measurably lifts registrations, and a registration is a lead whether or not they attend."
+        },
+        {
+            "key": "BONUS_LABEL",
+            "default": "Exclusive bonus"
+        },
+        {
+            "key": "BONUS_NAME",
+            "label": "Bonus -- name",
+            "guidance": "Name a real ASSET, not advice: a template, an audit, a script, a swipe file, an access. If it cannot be delivered as a file or a link, it is not a bonus.",
+            "example": "The Outreach Template Pack"
+        },
+        {
+            "key": "BONUS_VALUE_ANCHOR",
+            "label": "Bonus -- value anchor",
+            "guidance": "A defensible number that makes free feel expensive.",
+            "example": "Worth 300EUR"
+        },
+        {
+            "key": "BONUS_DESCRIPTION",
+            "label": "Bonus -- description",
+            "guidance": "What it is and what the reader can do with it immediately. Two lines maximum."
+        },
+        {
+            "key": "BONUS_CONDITION",
+            "label": "Bonus -- live-only condition",
+            "guidance": "State it plainly, in its own visual block. If you say live only, mean it: sending it to the replay crowd anyway teaches your list every future deadline is fake.",
+            "example": "Live attendees only. Not available to replay viewers."
+        },
+        {
+            "key": "DISQUALIFIER_LABEL",
+            "default": "Heads up"
+        },
+        {
+            "key": "DISQUALIFIER_HEADING",
+            "label": "Disqualifier -- what this is NOT",
+            "example": "This is NOT a generic webinar."
+        },
+        {
+            "key": "DISQUALIFIER_REFUSAL",
+            "label": "Disqualifier -- the refusal",
+            "guidance": "Attack the category, not a competitor. 'No pretty slides with nothing behind them' targets bad webinars in general; naming a rival makes you look small.",
+            "example": "No pretty slides with nothing behind them."
+        },
+        {
+            "key": "DISQUALIFIER_POSITIONING",
+            "label": "Disqualifier -- what it is instead",
+            "example": "A working session: concrete, immediately applicable."
+        },
+        {
+            "key": "DISQUALIFIER_LEADIN",
+            "default": "This only makes sense if:"
+        },
+        {
+            "key": "CRITERION_1",
+            "label": "Criterion 1 (their role or situation)"
+        },
+        {
+            "key": "CRITERION_2",
+            "label": "Criterion 2 (this topic is a real growth lever for them)"
+        },
+        {
+            "key": "CRITERION_3",
+            "label": "Criterion 3 (willingness to change their approach)",
+            "guidance": "Should be about willingness to change -- that is what separates a buyer from a browser."
+        },
+        {
+            "key": "SPEAKERS_HEADING",
+            "default": "Speakers"
+        },
+        {
+            "key": "SPEAKER_1_PHOTO_URL",
+            "label": "Speaker 1 -- photo",
+            "guidance": "Real photo, face visible, looking at the camera, 400x400, hosted on your own domain. Not a logo, not an avatar."
+        },
+        {
+            "key": "SPEAKER_1_NAME",
+            "label": "Speaker 1 -- full name"
+        },
+        {
+            "key": "SPEAKER_1_ROLE",
+            "label": "Speaker 1 -- years + domain",
+            "guidance": "'10+ years in marketing' outperforms 'Chief Marketing Officer': seniority signals distance, experience signals help.",
+            "example": "10+ years in B2B outreach"
+        },
+        {
+            "key": "SPEAKER_1_BIO",
+            "label": "Speaker 1 -- bio",
+            "guidance": "Two lines. Must contain a RESULT produced for people like the reader, not a career history or a list of tools."
+        },
+        {
+            "key": "SPEAKER_2_PHOTO_URL",
+            "label": "Speaker 2 -- photo"
+        },
+        {
+            "key": "SPEAKER_2_NAME",
+            "label": "Speaker 2 -- full name"
+        },
+        {
+            "key": "SPEAKER_2_ROLE",
+            "label": "Speaker 2 -- years + domain"
+        },
+        {
+            "key": "SPEAKER_2_BIO",
+            "label": "Speaker 2 -- bio"
+        },
+        {
+            "key": "CLIENT_LOGOS_URL",
+            "label": "Client logo strip image",
+            "guidance": "One image, greyed back so it supports rather than shouts. Only use logos you have permission to use."
+        },
+        {
+            "key": "CLIENT_PROOF_LINE",
+            "label": "Client proof caption",
+            "guidance": "Turns the logos into a number: how many clients trained or served, and what outcome you produced.",
+            "example": "Trusted by 150+ B2B teams to run their outreach."
+        },
+        {
+            "key": "FORM_BADGE",
+            "default": "Live"
+        },
+        {
+            "key": "FORM_HEADING",
+            "label": "Form box heading",
+            "guidance": "The action as a benefit, second person. 'Save your seat' beats 'Registration form' or 'Sign up'.",
+            "example": "Save your seat"
+        },
+        {
+            "key": "FORM_SUBTITLE",
+            "label": "Form box subtitle",
+            "guidance": "One true line of scarcity or exclusivity. If seats are not actually limited, say something else that is true: 'One session only, no repeat'.",
+            "example": "One session only, no repeat."
+        },
+        {
+            "key": "MAUTIC_FORM_ID",
+            "label": "Mautic form ID",
+            "guidance": "Numeric ID of an existing Mautic form (first name + email is the baseline; every extra field measurably reduces completions). The page CSS is scoped to .form-embed, not to a form ID, so any form dropped in inherits the styling automatically."
+        },
+        {
+            "key": "FORM_PRIVACY_LINE",
+            "label": "Privacy microcopy under the form",
+            "guidance": "One line, specific rather than vague -- this is the moment of hesitation right as the cursor is over submit.",
+            "example": "Your email is used for this session only. Unsubscribe in one click."
+        },
+        {
+            "key": "FOOTER_YEAR",
+            "label": "Copyright year",
+            "guidance": "Use the current year."
+        },
+        {
+            "key": "FOOTER_RIGHTS",
+            "default": "All rights reserved."
+        },
+        {
+            "key": "PRIVACY_URL",
+            "label": "Privacy policy URL",
+            "guidance": "Legally required on any page collecting data; Meta and Google will reject or pause ads pointing at a page without one."
+        },
+        {
+            "key": "TERMS_URL",
+            "label": "Terms of service URL"
+        }
+    ]
+}

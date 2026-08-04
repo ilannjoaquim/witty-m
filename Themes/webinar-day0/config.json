@@ -1,0 +1,9 @@
+{
+  "name": "Webinar Day 0",
+  "author": "Witty",
+  "authorUrl": "https://github.com/ilannjoaquim/witty-m",
+  "builder": ["grapesjsbuilder"],
+  "features": [
+    "email"
+  ]
+}

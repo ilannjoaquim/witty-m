@@ -14,10 +14,60 @@ class GeminiProvider extends AbstractHttpProvider
 {
     private const ENDPOINT        = 'https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent';
     private const ENDPOINT_STREAM = 'https://generativelanguage.googleapis.com/v1beta/models/%s:streamGenerateContent?alt=sse';
+    private const MODELS_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models';
 
     public function getKey(): string
     {
         return WittyConfig::PROVIDER_GEMINI;
+    }
+
+    /**
+     * @return array<int, array{id: string, label: string}>
+     */
+    public function listModels(string $apiKey): array
+    {
+        $models    = [];
+        $pageToken = null;
+
+        // Le catalogue Gemini inclut aussi les modeles d'embedding/image : on ne
+        // garde que ceux qui supportent generateContent, seul appel utilise ici.
+        for ($page = 0; $page < 10; ++$page) {
+            $query = ['pageSize' => 100];
+
+            if (null !== $pageToken) {
+                $query['pageToken'] = $pageToken;
+            }
+
+            $data = $this->get(self::MODELS_ENDPOINT, ['x-goog-api-key' => $apiKey], $query);
+
+            foreach ((array) ($data['models'] ?? []) as $model) {
+                $methods = (array) ($model['supportedGenerationMethods'] ?? []);
+
+                if (!in_array('generateContent', $methods, true)) {
+                    continue;
+                }
+
+                $name = (string) ($model['name'] ?? '');
+                $id   = str_starts_with($name, 'models/') ? substr($name, 7) : $name;
+
+                if ('' === $id) {
+                    continue;
+                }
+
+                $models[] = [
+                    'id'    => $id,
+                    'label' => (string) ($model['displayName'] ?? $id),
+                ];
+            }
+
+            $pageToken = $data['nextPageToken'] ?? null;
+
+            if (null === $pageToken || '' === $pageToken) {
+                break;
+            }
+        }
+
+        return $models;
     }
 
     public function chat(array $messages, array $tools, string $systemPrompt, string $model, string $apiKey): LlmResult

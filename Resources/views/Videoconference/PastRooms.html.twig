@@ -1,0 +1,172 @@
+{% extends '@MauticCore/Default/content.html.twig' %}
+
+{% block mauticContent 'wittyVideopast_rooms' %}
+
+{% block headerTitle %}{{ 'mautic.witty.video.past_rooms.header'|trans }}{% endblock %}
+
+{% block content %}
+<style>
+    .witty-video-stats { display: flex; gap: 12px; margin-bottom: 16px; }
+    .witty-video-stat { background: var(--background-hover, #f6f8fb); border-radius: 4px; padding: 12px 18px; }
+    .witty-video-stat .value { font-size: 22px; font-weight: 600; }
+    .witty-video-stat .label { font-size: 12px; color: var(--text-secondary, #6b7280); }
+    .witty-video-load-more { margin-top: 14px; text-align: center; }
+</style>
+
+<div id="witty-video-app"
+     data-configured="{{ isConfigured ? '1' : '0' }}"
+     data-data-endpoint="{{ path('witty_video_past_rooms_data') }}">
+
+    {% if not isConfigured %}
+        <div class="alert alert-warning">{{ 'mautic.witty.video.not_configured'|trans }}</div>
+    {% else %}
+        <div class="witty-video-stats" id="witty-video-stats"></div>
+        <div class="panel panel-default">
+            <div class="panel-body pb-0">
+                <div class="input-group d-flex">
+                    <span class="input-group-addon"><i class="ri-search-line" aria-hidden="true"></i></span>
+                    <input type="search" id="witty-video-filter" class="form-control search" placeholder="{{ 'mautic.witty.video.filter'|trans }}" autocomplete="off">
+                </div>
+            </div>
+            <div id="witty-video-table-wrap"></div>
+        </div>
+        <div id="witty-video-empty" class="mt-80 mb-80 col-md-offset-2 col-lg-offset-3 col-md-8 col-lg-6" style="display:none;">
+            {{ include('@MauticCore/Components/content-block.html.twig', {
+                heading: 'mautic.witty.video.past_rooms.empty',
+            }) }}
+        </div>
+        <div class="witty-video-load-more" id="witty-video-load-more" style="display:none;">
+            <button class="btn btn-secondary btn-nospin" size="sm" id="witty-video-load-more-btn" type="button">{{ 'mautic.witty.video.load_more'|trans }}</button>
+        </div>
+    {% endif %}
+</div>
+
+<script>
+(function () {
+    var app = document.getElementById('witty-video-app');
+    if (!app || app.dataset.wittyReady === '1') { return; }
+    app.dataset.wittyReady = '1';
+
+    if (app.dataset.configured !== '1') { return; }
+
+    var wrap        = document.getElementById('witty-video-table-wrap');
+    var emptyState  = document.getElementById('witty-video-empty');
+    var stats       = document.getElementById('witty-video-stats');
+    var loadMore    = document.getElementById('witty-video-load-more');
+    var loadMoreBtn = document.getElementById('witty-video-load-more-btn');
+    var filterInput = document.getElementById('witty-video-filter');
+    var rows        = [];
+    var cursor      = 0;
+    var total       = 0;
+    var filterTerm  = '';
+
+    function headersForm() {
+        return { 'X-Requested-With': 'XMLHttpRequest', 'X-CSRF-Token': window.mauticAjaxCsrf || '' };
+    }
+
+    function escapeHtml(value) {
+        var div = document.createElement('div');
+        div.textContent = value == null ? '' : String(value);
+        return div.innerHTML;
+    }
+
+    // L'API plugNmeet mele des secondes Unix et des chaines ISO 8601 selon
+    // l'endpoint (ex. created/ended des salles passees sont en ISO) : on gere
+    // les deux plutot que de supposer un format unique.
+    function toDate(value) {
+        if (!value) { return null; }
+        if (/^\d+$/.test(String(value))) { value = Number(value) * 1000; }
+        var date = new Date(value);
+        return isNaN(date.getTime()) ? null : date;
+    }
+
+    function formatDate(value) {
+        var date = toDate(value);
+        return date ? date.toLocaleString() : (value ? String(value) : '—');
+    }
+
+    function formatDuration(start, end) {
+        var startDate = toDate(start);
+        var endDate   = toDate(end);
+        if (!startDate || !endDate || endDate.getTime() <= startDate.getTime()) { return '—'; }
+        var minutes = Math.round((endDate.getTime() - startDate.getTime()) / 60000);
+        if (minutes < 60) { return minutes + ' min'; }
+        return Math.floor(minutes / 60) + ' h ' + (minutes % 60) + ' min';
+    }
+
+    function renderStats() {
+        stats.innerHTML =
+            '<div class="witty-video-stat"><div class="value">' + total + '</div><div class="label">{{ 'mautic.witty.video.past_rooms.total'|trans|e('js') }}</div></div>';
+    }
+
+    function visibleRows() {
+        if (!filterTerm) { return rows; }
+        return rows.filter(function (room) {
+            return (room.room_title || '').toLowerCase().indexOf(filterTerm) !== -1 ||
+                (room.room_id || '').toLowerCase().indexOf(filterTerm) !== -1;
+        });
+    }
+
+    function renderTable() {
+        if (!rows.length) {
+            wrap.innerHTML = '';
+            emptyState.style.display = '';
+            return;
+        }
+
+        var filtered = visibleRows();
+
+        emptyState.style.display = 'none';
+
+        wrap.innerHTML =
+            '<div class="table-responsive"><table class="table table-hover"><thead><tr>' +
+                '<th>{{ 'mautic.witty.video.past_rooms.title'|trans|e('js') }}</th>' +
+                '<th>{{ 'mautic.witty.video.past_rooms.room_id'|trans|e('js') }}</th>' +
+                '<th>{{ 'mautic.witty.video.past_rooms.started'|trans|e('js') }}</th>' +
+                '<th>{{ 'mautic.witty.video.past_rooms.ended'|trans|e('js') }}</th>' +
+                '<th>{{ 'mautic.witty.video.past_rooms.duration'|trans|e('js') }}</th>' +
+            '</tr></thead><tbody>' +
+            (filtered.length ? filtered.map(function (room) {
+                return '<tr>' +
+                    '<td>' + escapeHtml(room.room_title || room.room_id) + '</td>' +
+                    '<td>' + escapeHtml(room.room_id) + '</td>' +
+                    '<td>' + formatDate(room.created) + '</td>' +
+                    '<td>' + formatDate(room.ended) + '</td>' +
+                    '<td>' + formatDuration(room.created, room.ended) + '</td>' +
+                '</tr>';
+            }).join('') : '<tr><td colspan="5" class="text-center text-muted">{{ 'mautic.witty.video.filter_empty'|trans|e('js') }}</td></tr>') +
+            '</tbody></table></div>';
+    }
+
+    function load() {
+        fetch(app.dataset.dataEndpoint + '?from=' + cursor, { headers: headersForm() })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                if (!data.status) { wrap.innerHTML = '<div class="alert alert-danger">' + escapeHtml(data.msg) + '</div>'; return; }
+
+                var result = data.result || {};
+                var list   = result.rooms_list || [];
+
+                total  = result.total_rooms || rows.length + list.length;
+                rows   = rows.concat(list);
+                cursor = rows.length;
+
+                renderStats();
+                renderTable();
+
+                loadMore.style.display = (list.length > 0 && rows.length < total) ? 'block' : 'none';
+            })
+            .catch(function (err) { wrap.innerHTML = '<div class="alert alert-danger">' + escapeHtml(err.message) + '</div>'; });
+    }
+
+    loadMoreBtn.addEventListener('click', load);
+
+    filterInput.addEventListener('input', function () {
+        filterTerm = filterInput.value.trim().toLowerCase();
+        renderTable();
+    });
+
+    load();
+})();
+</script>
+{% endblock %}

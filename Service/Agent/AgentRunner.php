@@ -47,22 +47,36 @@ class AgentRunner
      * @param callable(string, array<string, mixed>): void|null $emit
      *
      * @return array{reply: string, trace: array<int, array<string, mixed>>, usage: array<string, int>}
+     *
+     * @throws LlmException si le fournisseur demande n'a pas de cle API configuree
      */
-    public function run(WittyConversation $conversation, string $userMessage, ?callable $emit = null): array
-    {
+    public function run(
+        WittyConversation $conversation,
+        string $userMessage,
+        ?callable $emit = null,
+        ?string $providerKey = null,
+        ?string $modelOverride = null,
+    ): array {
         if (!$this->config->isConfigured()) {
             throw new LlmException('Aucune cle API configuree. Renseigne-la dans Parametres > Plugins > Witty.');
+        }
+
+        // Un fournisseur demande depuis le chat mais dont la cle a ete retiree
+        // entre-temps ne doit pas echouer silencieusement sur un mauvais appel
+        // HTTP : on le rejette ici, avec un message exploitable par l'utilisateur.
+        if (null !== $providerKey && !$this->config->isProviderConfigured($providerKey)) {
+            throw new LlmException(sprintf("Le fournisseur '%s' n'a pas de cle API configuree.", $providerKey));
         }
 
         $this->usageGuard->assertWithinQuota();
 
         $this->conversations->append($conversation, Message::user($userMessage));
 
-        $provider     = $this->providerFactory->get();
+        $provider     = $this->providerFactory->get($providerKey ?? $this->config->getDefaultProvider());
         $definitions  = $this->toolRegistry->getDefinitions();
         $systemPrompt = $this->promptBuilder->build();
-        $model        = $this->config->getModel();
-        $apiKey       = $this->config->getApiKey();
+        $model        = '' !== (string) $modelOverride ? (string) $modelOverride : $this->config->getModel($provider->getKey());
+        $apiKey       = $this->config->getApiKey($provider->getKey());
 
         $conversation->setProvider($provider->getKey())->setModel($model);
 

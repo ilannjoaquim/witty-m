@@ -28,7 +28,7 @@ class DeleteEntityTool extends AbstractTool
 
     public function getDescription(): string
     {
-        return 'Supprime definitivement un objet : email, page, segment, campaign, form. '
+        return 'Supprime definitivement un objet. Types acceptes : '.implode(', ', $this->catalog->getTypes()).'. '
             .'Irreversible. Demande toujours l accord explicite de l utilisateur avant d appeler cet outil avec confirmed=true.';
     }
 

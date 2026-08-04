@@ -21,8 +21,13 @@ return function (ContainerConfigurator $configurator): void {
     // capacite de l'agent : ajouter un outil = deposer un fichier.
     $services->instanceof(ToolInterface::class)->tag('witty.tool');
 
+    // Objets de valeur : construits a la main, jamais injectes. Les laisser dans
+    // l'autowiring ferait echouer la compilation du conteneur sur leurs
+    // arguments scalaires.
     $excludes = [
         'Service/Llm/Dto',
+        'Service/Template/EmailTemplate.php',
+        'Service/Template/PageTemplate.php',
     ];
 
     $services->load('MauticPlugin\\WittyBundle\\', '../')

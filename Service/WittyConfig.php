@@ -13,26 +13,48 @@ use MauticPlugin\WittyBundle\Integration\WittyIntegration;
  * Acces centralise a la configuration du plugin.
  *
  * La source de verite est l'integration Mautic (Parametres > Plugins > Witty) :
- * la cle API vit dans la colonne api_keys, chiffree par Mautic, le reste dans
- * feature_settings. Rien n'est ecrit dans local.php.
+ * les cles API vivent dans la colonne api_keys, chiffrees par Mautic, le reste
+ * dans feature_settings. Rien n'est ecrit dans local.php.
+ *
+ * Le plugin n'impose plus un fournisseur unique : chaque cle renseignee rend
+ * son fournisseur disponible, et c'est le front (fil de discussion) qui choisit
+ * lequel utiliser a chaque tour, parmi ceux effectivement configures. La
+ * configuration ne fixe donc plus qu'un ordre de preference par defaut.
  */
 class WittyConfig
 {
     public const PROVIDER_ANTHROPIC = 'anthropic';
     public const PROVIDER_OPENAI    = 'openai';
     public const PROVIDER_GEMINI    = 'gemini';
+    public const PROVIDER_DEEPSEEK  = 'deepseek';
 
     public const DEFAULT_MAX_ITERATIONS = 8;
 
     /**
      * ATTENTION : les identifiants de modeles evoluent vite chez les trois
      * fournisseurs. Ce sont uniquement des valeurs de repli ; le modele exact
-     * se renseigne dans la fiche du plugin.
+     * se renseigne dans la fiche du plugin (facultatif) ou depuis le chat.
      */
     private const DEFAULT_MODELS = [
         self::PROVIDER_ANTHROPIC => 'claude-sonnet-5',
         self::PROVIDER_OPENAI    => 'gpt-4o',
         self::PROVIDER_GEMINI    => 'gemini-2.5-flash',
+        self::PROVIDER_DEEPSEEK  => 'deepseek-chat',
+    ];
+
+    private const PROVIDER_LABELS = [
+        self::PROVIDER_ANTHROPIC => 'Anthropic (Claude)',
+        self::PROVIDER_OPENAI    => 'OpenAI (GPT)',
+        self::PROVIDER_GEMINI    => 'Google (Gemini)',
+        self::PROVIDER_DEEPSEEK  => 'DeepSeek',
+    ];
+
+    /** Nom du champ de cle API par fournisseur, dans Integration::getApiKeys(). */
+    private const API_KEY_FIELDS = [
+        self::PROVIDER_ANTHROPIC => 'anthropic_api_key',
+        self::PROVIDER_OPENAI    => 'openai_api_key',
+        self::PROVIDER_GEMINI    => 'gemini_api_key',
+        self::PROVIDER_DEEPSEEK  => 'deepseek_api_key',
     ];
 
     public function __construct(
@@ -40,38 +62,100 @@ class WittyConfig
     ) {
     }
 
-    public function getProvider(): string
+    /**
+     * Fournisseurs pour lesquels une cle API non vide est renseignee, dans
+     * l'ordre de preference par defaut (Anthropic, OpenAI, Gemini).
+     *
+     * @return array<int, string>
+     */
+    public function getConfiguredProviders(): array
     {
-        $provider = (string) ($this->getFeatureSettings()['provider'] ?? '');
-
-        return array_key_exists($provider, self::DEFAULT_MODELS) ? $provider : self::PROVIDER_ANTHROPIC;
+        return array_values(array_filter(
+            array_keys(self::DEFAULT_MODELS),
+            fn (string $provider): bool => '' !== $this->getApiKey($provider),
+        ));
     }
 
-    public function getModel(): string
+    public function isProviderConfigured(string $provider): bool
     {
-        $model = trim((string) ($this->getFeatureSettings()['model'] ?? ''));
-
-        return '' !== $model ? $model : self::DEFAULT_MODELS[$this->getProvider()];
+        return in_array($provider, $this->getConfiguredProviders(), true);
     }
 
-    public function getApiKey(): string
+    /**
+     * Premier fournisseur configure, utilise quand le chat n'en precise aucun
+     * (nouvelle conversation, ou fournisseur demande devenu indisponible).
+     */
+    public function getDefaultProvider(): string
+    {
+        return $this->getConfiguredProviders()[0] ?? self::PROVIDER_ANTHROPIC;
+    }
+
+    public function getProviderLabel(string $provider): string
+    {
+        return self::PROVIDER_LABELS[$provider] ?? ucfirst($provider);
+    }
+
+    /**
+     * L'URL du serveur plugNmeet vit dans feature_settings (pas secrete),
+     * la cle et le secret dans api_keys (chiffres par Mautic).
+     */
+    public function getPlugNmeetServerUrl(): string
+    {
+        return rtrim(trim((string) ($this->getFeatureSettings()['plugnmeet_server_url'] ?? '')), '/');
+    }
+
+    public function getPlugNmeetApiKey(): string
     {
         $configuration = $this->getConfiguration();
 
-        if (null === $configuration) {
+        return null === $configuration ? '' : trim((string) ($configuration->getApiKeys()['plugnmeet_api_key'] ?? ''));
+    }
+
+    public function getPlugNmeetApiSecret(): string
+    {
+        $configuration = $this->getConfiguration();
+
+        return null === $configuration ? '' : trim((string) ($configuration->getApiKeys()['plugnmeet_api_secret'] ?? ''));
+    }
+
+    public function isPlugNmeetConfigured(): bool
+    {
+        return $this->isPublished()
+            && '' !== $this->getPlugNmeetServerUrl()
+            && '' !== $this->getPlugNmeetApiKey()
+            && '' !== $this->getPlugNmeetApiSecret();
+    }
+
+    public function getApiKey(string $provider): string
+    {
+        $configuration = $this->getConfiguration();
+        $field         = self::API_KEY_FIELDS[$provider] ?? null;
+
+        if (null === $configuration || null === $field) {
             return '';
         }
 
         // Dechiffree par IntegrationsHelper::getIntegrationConfiguration().
-        return trim((string) ($configuration->getApiKeys()['api_key'] ?? ''));
+        return trim((string) ($configuration->getApiKeys()[$field] ?? ''));
     }
 
     /**
-     * Le plugin doit etre active dans sa fiche ET disposer d'une cle API.
+     * Modele pour un fournisseur donne : celui renseigne en configuration, ou
+     * a defaut la valeur de repli du fournisseur.
+     */
+    public function getModel(string $provider): string
+    {
+        $model = trim((string) ($this->getFeatureSettings()[$provider.'_model'] ?? ''));
+
+        return '' !== $model ? $model : (self::DEFAULT_MODELS[$provider] ?? self::DEFAULT_MODELS[self::PROVIDER_ANTHROPIC]);
+    }
+
+    /**
+     * Le plugin doit etre actif dans sa fiche ET disposer d'au moins une cle API.
      */
     public function isConfigured(): bool
     {
-        return $this->isPublished() && '' !== $this->getApiKey();
+        return $this->isPublished() && [] !== $this->getConfiguredProviders();
     }
 
     public function isPublished(): bool

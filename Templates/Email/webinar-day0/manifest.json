@@ -1,0 +1,173 @@
+{
+    "key": "webinar-day0",
+    "name": "Webinar Day 0 (Announcement)",
+    "description": "The first email that introduces the webinar. Sells the PROBLEM, not a deadline -- nobody is waiting for this email yet, unlike a reminder. Pairs with the 'webinar' (reminder) template in this same library: reuse the same registration URL, date and brand across both.",
+    "language": "en",
+    "goal": "Get the reader to click through to the registration page by making them recognise their own situation, not by pressuring them with urgency -- that is reserved for the reminder emails.",
+    "rules": [
+        "Longer body copy than a reminder is expected: day 0 is where you earn attention, a reminder only has to re-activate it.",
+        "Only 2 CTAs, not 3. Pushing hard on a first touch reads as desperate.",
+        "No fake scarcity and no 'last chance' language here -- save real urgency for the reminder emails. If you burn it on day 0, the sequence has nowhere left to go.",
+        "The two verbatim quotes must be real (sales calls, support tickets, DMs, discovery forms), kept messy and spoken. Invented quotes in clean marketing English are obvious and destroy the effect.",
+        "The three CTAs across this and the reminder email all point to the SAME registration URL.",
+        "Keep at least 60% real text: an image-heavy email lands in spam and shows up empty when images are blocked."
+    ],
+    "placeholders": [
+        {
+            "key": "BRAND_NAME",
+            "label": "Brand name",
+            "guidance": "Used as the logo alt text and in the footer."
+        },
+        {
+            "key": "LOGO_URL",
+            "label": "Logo URL",
+            "guidance": "160-200px wide, transparent PNG, hosted on your own domain.",
+            "default": "https://placehold.co/360x120/000000/ffffff/png?text=YOUR+LOGO"
+        },
+        {
+            "key": "HERO_IMAGE_URL",
+            "label": "Hero visual URL",
+            "guidance": "600x338 (16:9). On day 0 a face outperforms an abstract graphic: people register for people. A speaker photo or a screen capture of the method works better here than a generic GIF.",
+            "default": "https://media3.giphy.com/media/v1.Y2lkPTc5MGI3NjExeThrY2gxZDFkejBnNnoydHozNnZla2V3bjhnemhuYW42Z3U2M3RpcCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/TjlE8AtuJTPxmuDdnk/giphy.gif"
+        },
+        {
+            "key": "HERO_IMAGE_ALT",
+            "label": "Hero visual alt text",
+            "example": "The speaker presenting the 3-step outreach method"
+        },
+        {
+            "key": "HOOK",
+            "label": "Hook line (day-0 specific, not used in the reminder)",
+            "guidance": "Two short lines, 4-9 words each, separated by <br/>. Line 1 is a statement the reader instantly agrees with; line 2 is the twist that opens your topic. Pattern interruption buys the two seconds needed to earn the headline. Formats that work: familiar truth + reversal, insider observation, contradiction. Cultural references land hard here, only if you share that culture with the reader.",
+            "context": "html_br",
+            "example": "Everyone wants more leads.<br/>Almost nobody fixes their follow-up first."
+        },
+        {
+            "key": "HEADLINE",
+            "label": "Headline",
+            "guidance": "6 to 14 words naming the transformation. Day 0 has no deadline to lean on, so the headline carries the value alone. Pick one angle: outcome, gap, or method. Ban 'Join our webinar', 'Newsletter #12', 'Don't miss out'.",
+            "example": "Cold outreach in 2026: what actually gets replies"
+        },
+        {
+            "key": "SUBHEADLINE",
+            "label": "Subheadline",
+            "guidance": "One line, 6-14 words: the measurable part the headline couldn't fit.",
+            "example": "The 3-message sequence that books meetings without a bigger list"
+        },
+        {
+            "key": "SOCIAL_PROOF",
+            "label": "Social proof",
+            "guidance": "One real, verifiable number. On day 0 it is your only credibility signal -- the reader has no reason to trust you yet. No number available? Use experience instead, or delete the block. Never invent one.",
+            "example": "12 years running cold outreach for B2B teams"
+        },
+        {
+            "key": "READING_TIME",
+            "default": "(reading time: 1 min)"
+        },
+        {
+            "key": "DATE_LINE",
+            "label": "Date line above CTA 1",
+            "guidance": "Factual, not pressuring -- day 0 has no real urgency yet.",
+            "example": "🟢 LIVE WEBINAR | Thursday, 12 March at 10:30 CET"
+        },
+        {
+            "key": "CTA_PRIMARY",
+            "label": "CTA 1",
+            "guidance": "2 to 5 words, first person.",
+            "example": "Save my seat"
+        },
+        {
+            "key": "REGISTRATION_URL",
+            "label": "Registration URL",
+            "guidance": "Same URL used in both CTAs here and in the reminder email."
+        },
+        {
+            "key": "SITUATION",
+            "label": "The situation",
+            "guidance": "One sentence describing the reader's constraint, not the topic. Specificity is what makes it feel personal at scale.",
+            "example": "When you're the only one handling outreach, every reply feels like luck."
+        },
+        {
+            "key": "WHY_NOW",
+            "label": "Why now",
+            "guidance": "One sentence on what changed recently and made it worse.",
+            "example": "Especially since inbox filters got stricter in January."
+        },
+        {
+            "key": "PROBLEM",
+            "label": "The problem, named out loud",
+            "guidance": "One sentence, gives the reader permission to be confused. Add an absolving clause -- 'and for good reason', 'it's not their fault'.",
+            "example": "The truth? Most founders are lost on this -- and for good reason."
+        },
+        {
+            "key": "QUOTE_1",
+            "label": "Verbatim quote 1 -- the confusion",
+            "guidance": "A REAL quote from a real prospect or customer (sales call, support ticket, DM). Keep the messy, spoken phrasing including hesitations. Do not write it yourself in clean marketing English."
+        },
+        {
+            "key": "QUOTE_2",
+            "label": "Verbatim quote 2 -- the paralysis",
+            "guidance": "Same rule as quote 1, about not knowing what to prioritise."
+        },
+        {
+            "key": "IMMEDIATE_COST",
+            "label": "Immediate cost of inaction",
+            "example": "So you keep sending, with no real way to know what's working."
+        },
+        {
+            "key": "SLOW_COST",
+            "label": "Slow cost of inaction",
+            "example": "And the list you should be building keeps getting pushed to next month."
+        },
+        {
+            "key": "PIVOT",
+            "label": "The pivot",
+            "guidance": "Max 8 words.",
+            "example": "That's exactly what we help you fix."
+        },
+        {
+            "key": "SESSION_NAME",
+            "label": "Session name",
+            "guidance": "Keep it short and repeat the EXACT same name on the landing page. A mismatch causes drop-off.",
+            "example": "🤖 Outreach Live #1"
+        },
+        {
+            "key": "DATE_TIME",
+            "label": "Date, time, timezone",
+            "guidance": "Re-check this every reuse of the template: an inconsistent date destroys credibility."
+        },
+        {
+            "key": "TOPIC_LINE",
+            "label": "Topic line",
+            "guidance": "The transformation, not the subject matter.",
+            "example": "the 3-message sequence that books 8 meetings a week"
+        },
+        {
+            "key": "BULLET_1",
+            "label": "Agenda bullet 1",
+            "guidance": "The ingredients of a method that actually works this year.",
+            "example": "Why 80% of outreach sequences get filtered before they're read"
+        },
+        {
+            "key": "BULLET_2",
+            "label": "Agenda bullet 2",
+            "guidance": "The speed or effort objection removed.",
+            "example": "How to personalise 50 emails in under an hour, without a VA"
+        },
+        {
+            "key": "BULLET_3",
+            "label": "Agenda bullet 3",
+            "guidance": "Your named signature method, most desirable, last.",
+            "example": "The 3-message sequence we use to book 8 meetings a week"
+        },
+        {
+            "key": "CTA_SECONDARY",
+            "label": "CTA 2",
+            "example": "Save my spot now 🔥"
+        },
+        {
+            "key": "POSTAL_ADDRESS",
+            "label": "Postal address"
+        }
+    ]
+}

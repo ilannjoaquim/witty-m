@@ -4,22 +4,20 @@ declare(strict_types=1);
 
 namespace MauticPlugin\WittyBundle\Service\Tool\Tools;
 
-use Mautic\CampaignBundle\Model\CampaignModel;
-use Mautic\EmailBundle\Model\EmailModel;
-use Mautic\LeadBundle\Model\ListModel;
-use Mautic\PageBundle\Model\PageModel;
 use MauticPlugin\WittyBundle\Service\Tool\AbstractTool;
+use MauticPlugin\WittyBundle\Service\Tool\EntityCatalog;
 
 /**
  * Outil de lecture : permet a l'agent de decouvrir l'existant avant d'ecrire.
+ *
+ * S'appuie sur EntityCatalog plutot que sur un match code en dur : un type
+ * ajoute au catalogue (pour update_entity/delete_entity) devient listable sans
+ * toucher ce fichier.
  */
 class ListEntitiesTool extends AbstractTool
 {
     public function __construct(
-        private ListModel $listModel,
-        private EmailModel $emailModel,
-        private PageModel $pageModel,
-        private CampaignModel $campaignModel,
+        private EntityCatalog $catalog,
     ) {
     }
 
@@ -30,7 +28,7 @@ class ListEntitiesTool extends AbstractTool
 
     public function getDescription(): string
     {
-        return 'Liste les objets Mautic existants (segments, emails, landing pages, campagnes). '
+        return 'Liste les objets Mautic existants. Types acceptes : '.implode(', ', $this->catalog->getTypes()).'. '
             .'A utiliser systematiquement avant de creer quelque chose, pour reutiliser un objet existant '
             .'et pour recuperer les identifiants numeriques necessaires aux autres outils.';
     }
@@ -40,7 +38,7 @@ class ListEntitiesTool extends AbstractTool
         return $this->schema([
             'entity' => [
                 'type'        => 'string',
-                'enum'        => ['segments', 'emails', 'pages', 'campaigns'],
+                'enum'        => $this->catalog->getTypes(),
                 'description' => "Type d'objet a lister.",
             ],
             'search' => [
@@ -59,23 +57,21 @@ class ListEntitiesTool extends AbstractTool
         $entity = (string) ($arguments['entity'] ?? '');
         $limit  = max(1, min(100, (int) ($arguments['limit'] ?? 25)));
 
+        if (!$this->catalog->supports($entity)) {
+            return ['status' => 'error', 'error' => sprintf('Type inconnu : %s. Types acceptes : %s', $entity, implode(', ', $this->catalog->getTypes()))];
+        }
+
+        $model = $this->catalog->getModel($entity);
+
+        if (null === $model) {
+            return ['status' => 'error', 'error' => sprintf('Type inconnu : %s', $entity)];
+        }
+
         $args = [
             'start'  => 0,
             'limit'  => $limit,
             'filter' => ['string' => (string) ($arguments['search'] ?? '')],
         ];
-
-        $model = match ($entity) {
-            'segments'  => $this->listModel,
-            'emails'    => $this->emailModel,
-            'pages'     => $this->pageModel,
-            'campaigns' => $this->campaignModel,
-            default     => null,
-        };
-
-        if (null === $model) {
-            return ['status' => 'error', 'error' => sprintf('Type inconnu : %s', $entity)];
-        }
 
         $items = [];
 
@@ -86,10 +82,7 @@ class ListEntitiesTool extends AbstractTool
 
             $items[] = array_filter([
                 'id'          => method_exists($item, 'getId') ? $item->getId() : null,
-                'name'        => method_exists($item, 'getName') ? $item->getName() : null,
-                'title'       => method_exists($item, 'getTitle') ? $item->getTitle() : null,
-                'alias'       => method_exists($item, 'getAlias') ? $item->getAlias() : null,
-                'subject'     => method_exists($item, 'getSubject') ? $item->getSubject() : null,
+                'name'        => $this->catalog->describe($item),
                 'isPublished' => method_exists($item, 'isPublished') ? $item->isPublished() : null,
             ], static fn ($value): bool => null !== $value);
         }

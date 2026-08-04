@@ -48,6 +48,40 @@ abstract class AbstractHttpProvider implements LlmProviderInterface
     }
 
     /**
+     * @param array<string, string> $headers
+     * @param array<string, mixed>  $query
+     *
+     * @return array<string, mixed>
+     */
+    protected function get(string $url, array $headers, array $query = []): array
+    {
+        try {
+            $response = $this->httpClient->request('GET', $url, [
+                'headers' => $headers,
+                'query'   => $query,
+                'timeout' => 30,
+            ]);
+
+            $status = $response->getStatusCode();
+            $body   = $response->getContent(false);
+        } catch (\Throwable $e) {
+            throw new LlmException(sprintf('%s: appel HTTP impossible (%s)', static::class, $e->getMessage()), 0, $e);
+        }
+
+        $decoded = json_decode($body, true);
+
+        if (!is_array($decoded)) {
+            throw new LlmException(sprintf('Reponse non-JSON du fournisseur (HTTP %d).', $status));
+        }
+
+        if ($status >= 400) {
+            $this->throwFromErrorBody($status, $body);
+        }
+
+        return $decoded;
+    }
+
+    /**
      * Consomme un flux SSE et passe chaque evenement decode a $onEvent.
      *
      * Le decoupage se fait sur les lignes et non sur les chunks HTTP : un chunk

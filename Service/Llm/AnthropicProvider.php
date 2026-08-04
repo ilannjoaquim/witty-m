@@ -12,12 +12,49 @@ use MauticPlugin\WittyBundle\Service\WittyConfig;
 
 class AnthropicProvider extends AbstractHttpProvider
 {
-    private const ENDPOINT = 'https://api.anthropic.com/v1/messages';
-    private const VERSION  = '2023-06-01';
+    private const ENDPOINT        = 'https://api.anthropic.com/v1/messages';
+    private const MODELS_ENDPOINT = 'https://api.anthropic.com/v1/models';
+    private const VERSION         = '2023-06-01';
 
     public function getKey(): string
     {
         return WittyConfig::PROVIDER_ANTHROPIC;
+    }
+
+    /**
+     * @return array<int, array{id: string, label: string}>
+     */
+    public function listModels(string $apiKey): array
+    {
+        $models  = [];
+        $afterId = null;
+
+        // Pagine par after_id ; le catalogue Anthropic tient largement en une
+        // page, la boucle est juste un garde-fou si ca change.
+        for ($page = 0; $page < 10; ++$page) {
+            $query = [];
+
+            if (null !== $afterId) {
+                $query['after_id'] = $afterId;
+            }
+
+            $data = $this->get(self::MODELS_ENDPOINT, $this->headers($apiKey), $query);
+
+            foreach ((array) ($data['data'] ?? []) as $model) {
+                $models[] = [
+                    'id'    => (string) ($model['id'] ?? ''),
+                    'label' => (string) ($model['display_name'] ?? $model['id'] ?? ''),
+                ];
+            }
+
+            if (true !== ($data['has_more'] ?? false) || !isset($data['last_id'])) {
+                break;
+            }
+
+            $afterId = (string) $data['last_id'];
+        }
+
+        return $models;
     }
 
     public function chat(array $messages, array $tools, string $systemPrompt, string $model, string $apiKey): LlmResult

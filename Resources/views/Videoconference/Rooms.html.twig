@@ -1,0 +1,419 @@
+{% extends '@MauticCore/Default/content.html.twig' %}
+
+{% block mauticContent 'wittyVideorooms' %}
+
+{% block headerTitle %}{{ 'mautic.witty.video.rooms.header'|trans }}{% endblock %}
+
+{% block actions %}
+    {% if isConfigured %}
+        {% include '@MauticCore/Helper/button.html.twig' with {
+            buttons: [
+                {
+                    label: 'mautic.witty.video.rooms.create',
+                    icon: 'ri-add-line',
+                    variant: 'primary',
+                    attributes: { id: 'witty-video-create-btn', type: 'button' }
+                }
+            ]
+        } %}
+    {% endif %}
+{% endblock %}
+
+{% block content %}
+<style>
+    /* Complements des classes Mautic reelles : pas de reimplementation des
+       boutons/tableaux/panels, juste la mise en page propre a cette page. */
+    .witty-video-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
+    .witty-video-card { background: var(--background, #fff); border: 1px solid var(--border-subtle, #e0e0e0); border-radius: 4px; padding: 14px 16px; }
+    .witty-video-card h3 { margin: 0 0 6px; font-size: 15px; }
+    .witty-video-card .meta { font-size: 12px; color: var(--text-secondary, #6b7280); margin-bottom: 10px; }
+    .witty-video-card .tags { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 10px; }
+    .witty-video-card .actions { display: flex; gap: 6px; flex-wrap: wrap; }
+    .witty-video-modal .form-row { display: flex; gap: 16px; }
+    .witty-video-modal .form-row .form-group { flex: 1; }
+    .witty-video-modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 1050; align-items: flex-start; justify-content: center; padding: 60px 16px; overflow-y: auto; }
+    .witty-video-modal-overlay.open { display: flex; }
+    .witty-video-modal { background: #fff; border-radius: 4px; width: 100%; max-width: 520px; box-shadow: 0 2px 18px rgba(0,0,0,.2); }
+    .witty-video-modal-body { padding: 20px 24px; }
+    .witty-video-modal-body h2 { margin: 0 0 18px; font-size: 20px; font-weight: 400; }
+    .witty-video-modal .form-group { margin-bottom: 12px; }
+    .witty-video-modal label { display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px; }
+    .witty-video-lock-row { display: flex; align-items: center; gap: 8px; font-size: 13px; padding: 3px 0; }
+    .witty-video-lock-row label { font-weight: 400; margin: 0; }
+    .witty-video-link-block { margin-bottom: 14px; padding: 10px; background: var(--background-hover, #f6f8fb); border-radius: 4px; }
+    .witty-video-link-block .url { word-break: break-all; font-size: 12px; }
+    .witty-video-modal-footer { display: flex; }
+    .witty-video-modal-footer .btn { flex: 1; border-radius: 0; justify-content: center; }
+    .witty-video-modal-footer .btn:first-child { border-bottom-left-radius: 4px; }
+    .witty-video-modal-footer .btn:last-child { border-bottom-right-radius: 4px; }
+</style>
+
+<div id="witty-video-app"
+     data-configured="{{ isConfigured ? '1' : '0' }}"
+     data-data-endpoint="{{ path('witty_video_rooms_data') }}"
+     data-create-endpoint="{{ path('witty_video_rooms_create') }}"
+     data-end-endpoint="{{ path('witty_video_rooms_end') }}"
+     data-details-endpoint="{{ path('witty_video_rooms_details') }}"
+     data-link-endpoint="{{ path('witty_video_rooms_link') }}"
+     data-category-new-url="{{ path('mautic_category_action', { bundle: 'witty_room', objectAction: 'new', inForm: 1 }) }}">
+
+    {% if not isConfigured %}
+        <div class="alert alert-warning">{{ 'mautic.witty.video.not_configured'|trans }}</div>
+    {% else %}
+        <div class="input-group d-flex mb-md">
+            <span class="input-group-addon"><i class="ri-search-line" aria-hidden="true"></i></span>
+            <input type="search" id="witty-video-filter" class="form-control search" placeholder="{{ 'mautic.witty.video.filter'|trans }}" autocomplete="off">
+        </div>
+        <div id="witty-video-grid" class="witty-video-grid"></div>
+        <div id="witty-video-empty" class="mt-80 mb-80 col-md-offset-2 col-lg-offset-3 col-md-8 col-lg-6" style="display:none;">
+            {{ include('@MauticCore/Components/content-block.html.twig', {
+                heading: 'mautic.witty.video.rooms.empty_heading',
+                copy: 'mautic.witty.video.rooms.empty',
+            }) }}
+        </div>
+    {% endif %}
+
+    <div id="witty-video-overlay" class="witty-video-modal-overlay">
+        <div class="witty-video-modal" id="witty-video-modal"></div>
+    </div>
+</div>
+
+<script>
+(function () {
+    var app = document.getElementById('witty-video-app');
+    if (!app || app.dataset.wittyReady === '1') { return; }
+    app.dataset.wittyReady = '1';
+
+    if (app.dataset.configured !== '1') { return; }
+
+    var grid        = document.getElementById('witty-video-grid');
+    var emptyState  = document.getElementById('witty-video-empty');
+    var overlay     = document.getElementById('witty-video-overlay');
+    var modal       = document.getElementById('witty-video-modal');
+    var filterInput = document.getElementById('witty-video-filter');
+    var allRooms    = [];
+    var filterTerm  = '';
+    var options     = { categories: [], projects: [] };
+
+    var LOCK_FIELDS = [
+        ['lock_microphone', {{ 'mautic.witty.video.lock.microphone'|trans|json_encode|raw }}, false],
+        ['lock_webcam', {{ 'mautic.witty.video.lock.webcam'|trans|json_encode|raw }}, false],
+        ['lock_screen_sharing', {{ 'mautic.witty.video.lock.screen_sharing'|trans|json_encode|raw }}, true],
+        ['lock_whiteboard', {{ 'mautic.witty.video.lock.whiteboard'|trans|json_encode|raw }}, true],
+        ['lock_shared_notepad', {{ 'mautic.witty.video.lock.shared_notepad'|trans|json_encode|raw }}, true],
+        ['lock_chat', {{ 'mautic.witty.video.lock.chat'|trans|json_encode|raw }}, false],
+        ['lock_private_chat', {{ 'mautic.witty.video.lock.private_chat'|trans|json_encode|raw }}, false]
+    ];
+
+    function headersForm() {
+        return { 'X-Requested-With': 'XMLHttpRequest', 'X-CSRF-Token': window.mauticAjaxCsrf || '' };
+    }
+
+    function toForm(data) {
+        var params = new URLSearchParams();
+        Object.keys(data).forEach(function (key) {
+            var value = data[key];
+            if (Array.isArray(value)) {
+                value.forEach(function (v) { params.append(key + '[]', v); });
+            } else if (value && typeof value === 'object') {
+                Object.keys(value).forEach(function (sub) { params.append(key + '[' + sub + ']', value[sub] ? '1' : ''); });
+            } else {
+                params.append(key, value);
+            }
+        });
+        return params;
+    }
+
+    function openModal(html) {
+        modal.innerHTML = html;
+        overlay.classList.add('open');
+    }
+
+    function closeModal() {
+        overlay.classList.remove('open');
+        modal.innerHTML = '';
+    }
+
+    overlay.addEventListener('click', function (event) {
+        if (event.target === overlay) { closeModal(); }
+    });
+
+    function escapeHtml(value) {
+        var div = document.createElement('div');
+        div.textContent = value == null ? '' : String(value);
+        return div.innerHTML;
+    }
+
+    // L'API plugNmeet mele des secondes Unix (creation_time des salles actives)
+    // et des chaines ISO 8601 (created/ended des salles passees) : on gere les
+    // deux plutot que de supposer un format unique.
+    function formatDate(value) {
+        if (!value) { return '—'; }
+        if (/^\d+$/.test(String(value))) { value = Number(value) * 1000; }
+        var date = new Date(value);
+        return isNaN(date.getTime()) ? String(value) : date.toLocaleString();
+    }
+
+    function loadRooms() {
+        fetch(app.dataset.dataEndpoint, { headers: headersForm() })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                if (!data.status) { renderError(data.msg); return; }
+                allRooms = data.rooms || [];
+                options  = data.options || { categories: [], projects: [] };
+                renderRooms();
+            })
+            .catch(function (err) { renderError(err.message); });
+    }
+
+    function renderError(msg) {
+        emptyState.style.display = 'none';
+        grid.innerHTML = '<div class="alert alert-danger">' + escapeHtml(msg) + '</div>';
+    }
+
+    function renderRooms() {
+        if (!allRooms.length) {
+            grid.innerHTML = '';
+            emptyState.style.display = '';
+            return;
+        }
+
+        emptyState.style.display = 'none';
+
+        var rooms = !filterTerm ? allRooms : allRooms.filter(function (entry) {
+            var info = entry.room_info || {};
+            return (info.room_title || '').toLowerCase().indexOf(filterTerm) !== -1 ||
+                (info.room_id || '').toLowerCase().indexOf(filterTerm) !== -1;
+        });
+
+        if (!rooms.length) {
+            grid.innerHTML = '<p class="text-muted">{{ 'mautic.witty.video.filter_empty'|trans|e('js') }}</p>';
+            return;
+        }
+
+        grid.innerHTML = rooms.map(function (entry) {
+            var info  = entry.room_info || {};
+            var witty = entry.witty || {};
+
+            var tags = '';
+            tags += '<span class="label label-default">' + escapeHtml(witty.category || '{{ 'mautic.core.form.uncategorized'|trans|e('js') }}') + '</span>';
+            (witty.projects || []).forEach(function (name) {
+                tags += '<span class="label label-info">' + escapeHtml(name) + '</span>';
+            });
+
+            return '' +
+                '<div class="witty-video-card">' +
+                    '<h3>' + escapeHtml(info.room_title || info.room_id) + '</h3>' +
+                    '<div class="meta">' + escapeHtml(info.room_id) + '<br>' +
+                        (info.joined_participants || 0) + ' {{ 'mautic.witty.video.rooms.participants'|trans|e('js') }} &middot; ' +
+                        formatDate(info.creation_time) + '<br>' +
+                        '{{ 'mautic.witty.video.rooms.total_participants'|trans|e('js') }} : ' + (witty.totalParticipants || 0) + ' &middot; ' +
+                        '{{ 'mautic.core.createdby'|trans|e('js') }} : ' + escapeHtml(witty.createdBy || '—') +
+                    '</div>' +
+                    '<div class="tags">' + tags + '</div>' +
+                    '<div class="actions">' +
+                        '<button class="btn btn-secondary btn-nospin" size="sm" data-action="details" data-id="' + escapeHtml(info.room_id) + '">{{ 'mautic.witty.video.rooms.details'|trans|e('js') }}</button>' +
+                        '<button class="btn btn-secondary btn-nospin" size="sm" data-action="links" data-id="' + escapeHtml(info.room_id) + '">{{ 'mautic.witty.video.rooms.links'|trans|e('js') }}</button>' +
+                        '<button class="btn btn-primary btn-danger btn-nospin" size="sm" data-action="end" data-id="' + escapeHtml(info.room_id) + '">{{ 'mautic.witty.video.rooms.end'|trans|e('js') }}</button>' +
+                    '</div>' +
+                '</div>';
+        }).join('');
+
+        grid.querySelectorAll('[data-action="details"]').forEach(function (el) {
+            el.addEventListener('click', function () { openDetails(el.dataset.id); });
+        });
+        grid.querySelectorAll('[data-action="links"]').forEach(function (el) {
+            el.addEventListener('click', function () { openLinks(el.dataset.id); });
+        });
+        grid.querySelectorAll('[data-action="end"]').forEach(function (el) {
+            el.addEventListener('click', function () { endRoom(el.dataset.id); });
+        });
+    }
+
+    function openCreate() {
+        var lockRows = LOCK_FIELDS.map(function (field) {
+            return '<div class="witty-video-lock-row">' +
+                '<input type="checkbox" id="lock_' + field[0] + '"' + (field[2] ? ' checked' : '') + '>' +
+                '<label for="lock_' + field[0] + '">' + escapeHtml(field[1]) + '</label>' +
+            '</div>';
+        }).join('');
+
+        var categoryModalHeader = '{{ 'mautic.category.header.new'|trans|e('js') }}';
+
+        var categoryOptions = '<option value="">{{ 'mautic.core.form.uncategorized'|trans|e('js') }}</option>' +
+            options.categories.map(function (c) {
+                return '<option value="' + c.id + '">' + escapeHtml(c.title) + '</option>';
+            }).join('') +
+            '<option value="new">{{ 'mautic.category.createnew'|trans|e('js') }}</option>';
+
+        var projectOptions = options.projects.map(function (p) {
+            return '<option value="' + p.id + '">' + escapeHtml(p.name) + '</option>';
+        }).join('');
+
+        openModal(
+            '<div class="witty-video-modal-body">' +
+                '<h2>{{ 'mautic.witty.video.rooms.create'|trans|e('js') }}</h2>' +
+                '<div class="form-group"><label>{{ 'mautic.witty.video.rooms.room_id'|trans|e('js') }}</label>' +
+                    '<input type="text" id="witty-room-id" class="form-control" placeholder="team-standup"></div>' +
+                '<div class="form-group"><label>{{ 'mautic.witty.video.rooms.title'|trans|e('js') }}</label>' +
+                    '<input type="text" id="witty-room-title" class="form-control"></div>' +
+                '<div class="form-row">' +
+                    '<div class="form-group"><label for="witty-room-category">{{ 'mautic.core.category'|trans|e('js') }}</label>' +
+                        '<div class="choice-wrapper">' +
+                            '<select id="witty-room-category" name="category" class="form-control category-select" autocomplete="false">' + categoryOptions + '</select>' +
+                        '</div>' +
+                    '</div>' +
+                    '<div class="form-group"><label for="witty-room-projects">{{ 'project.menu.index'|trans|default('Projects')|e('js') }}</label>' +
+                        '<div class="choice-wrapper">' +
+                            '<select id="witty-room-projects" name="projects[]" autocomplete="false" multiple="multiple"' +
+                                ' data-placeholder="{{ 'mautic.project.select_or_create'|trans|e('js') }}"' +
+                                ' data-action="createProject"' +
+                                ' data-no-results-text="{{ 'mautic.project.enter_to_create'|trans|e('js') }}"' +
+                                ' data-allow-add="true">' + projectOptions + '</select>' +
+                        '</div>' +
+                    '</div>' +
+                '</div>' +
+                '<div class="form-group"><label>{{ 'mautic.witty.video.rooms.lock_settings'|trans|e('js') }}</label>' + lockRows + '</div>' +
+            '</div>' +
+            '<div class="witty-video-modal-footer">' +
+                '<button class="btn btn-primary" id="witty-room-submit" type="button"><i class="ri-check-line"></i> <span>{{ 'mautic.witty.video.rooms.create'|trans|e('js') }}</span></button>' +
+                '<button class="btn btn-secondary" id="witty-room-cancel" type="button"><i class="ri-close-line"></i> <span>{{ 'mautic.core.form.cancel'|trans|e('js') }}</span></button>' +
+            '</div>'
+        );
+
+        document.getElementById('witty-room-cancel').addEventListener('click', closeModal);
+
+        var roomCategorySelect = document.getElementById('witty-room-category');
+        roomCategorySelect.addEventListener('change', function () {
+            Mautic.loadAjaxModalBySelectValue(roomCategorySelect, 'new', app.dataset.categoryNewUrl, categoryModalHeader);
+        });
+        if (window.Mautic && typeof Mautic.activateChosenSelect === 'function') {
+            Mautic.activateChosenSelect(roomCategorySelect);
+            Mautic.activateChosenSelect(document.getElementById('witty-room-projects'));
+        }
+
+        document.getElementById('witty-room-submit').addEventListener('click', function () {
+            var roomId = document.getElementById('witty-room-id').value.trim();
+            var title  = document.getElementById('witty-room-title').value.trim();
+
+            if (!roomId) { window.alert('{{ 'mautic.witty.video.rooms.room_id'|trans|e('js') }}'); return; }
+
+            var lock = {};
+            LOCK_FIELDS.forEach(function (field) { lock[field[0]] = document.getElementById('lock_' + field[0]).checked; });
+
+            var categoryId = document.getElementById('witty-room-category').value;
+            var projectIds = Array.prototype.map.call(
+                document.getElementById('witty-room-projects').selectedOptions,
+                function (opt) { return opt.value; }
+            );
+
+            fetch(app.dataset.createEndpoint, {
+                method: 'POST',
+                headers: headersForm(),
+                body: toForm({ room_id: roomId, title: title, lock: lock, category_id: categoryId, project_ids: projectIds })
+            })
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                    if (!data.status) { window.alert(data.msg || 'Error'); return; }
+                    closeModal();
+                    loadRooms();
+                })
+                .catch(function (err) { window.alert(err.message); });
+        });
+    }
+
+    function openDetails(roomId) {
+        openModal('<div class="witty-video-modal-body"><p>{{ 'mautic.witty.video.loading'|trans|e('js') }}</p></div>');
+
+        fetch(app.dataset.detailsEndpoint + '?room_id=' + encodeURIComponent(roomId), { headers: headersForm() })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                if (!data.status) { modal.innerHTML = '<div class="witty-video-modal-body"><p>' + escapeHtml(data.msg) + '</p></div>'; return; }
+
+                var room = data.room || {};
+                var info = room.room_info || {};
+                var participants = room.participants_info || [];
+
+                var rows = participants.map(function (p) {
+                    return '<tr><td>' + escapeHtml(p.name) + '</td><td>' + (p.is_admin ? '{{ 'mautic.witty.video.rooms.admin'|trans|e('js') }}' : '{{ 'mautic.witty.video.rooms.listener'|trans|e('js') }}') + '</td></tr>';
+                }).join('');
+
+                modal.innerHTML =
+                    '<div class="witty-video-modal-body">' +
+                        '<h2>' + escapeHtml(info.room_title || roomId) + '</h2>' +
+                        '<p class="text-muted">' + escapeHtml(roomId) + '</p>' +
+                        '<div class="table-responsive"><table class="table table-hover"><thead><tr><th>{{ 'mautic.witty.video.rooms.participant_name'|trans|e('js') }}</th><th>{{ 'mautic.witty.video.rooms.participant_role'|trans|e('js') }}</th></tr></thead>' +
+                        '<tbody>' + (rows || '<tr><td colspan="2">{{ 'mautic.witty.video.rooms.no_participants'|trans|e('js') }}</td></tr>') + '</tbody></table></div>' +
+                    '</div>' +
+                    '<div class="witty-video-modal-footer">' +
+                        '<button class="btn btn-secondary" id="witty-details-close" type="button"><i class="ri-close-line"></i> <span>{{ 'mautic.witty.video.close'|trans|e('js') }}</span></button>' +
+                    '</div>';
+
+                document.getElementById('witty-details-close').addEventListener('click', closeModal);
+            });
+    }
+
+    function openLinks(roomId) {
+        openModal(
+            '<div class="witty-video-modal-body">' +
+                '<h2>{{ 'mautic.witty.video.rooms.links'|trans|e('js') }}</h2>' +
+                '<p class="text-muted">' + escapeHtml(roomId) + '</p>' +
+                '<div class="form-group"><label>{{ 'mautic.witty.video.rooms.participant_name'|trans|e('js') }}</label>' +
+                    '<input type="text" id="witty-link-name" class="form-control" value="Moderator"></div>' +
+                '<div class="mb-md">' +
+                    '<button class="btn btn-secondary btn-nospin" size="sm" id="witty-gen-listener" type="button">{{ 'mautic.witty.video.rooms.gen_listener'|trans|e('js') }}</button> ' +
+                    '<button class="btn btn-secondary btn-nospin" size="sm" id="witty-gen-presenter" type="button">{{ 'mautic.witty.video.rooms.gen_presenter'|trans|e('js') }}</button>' +
+                '</div>' +
+                '<div id="witty-link-result"></div>' +
+            '</div>' +
+            '<div class="witty-video-modal-footer">' +
+                '<button class="btn btn-secondary" id="witty-links-close" type="button"><i class="ri-close-line"></i> <span>{{ 'mautic.witty.video.close'|trans|e('js') }}</span></button>' +
+            '</div>'
+        );
+
+        document.getElementById('witty-links-close').addEventListener('click', closeModal);
+
+        function generate(isAdmin) {
+            var name = document.getElementById('witty-link-name').value.trim() || 'Moderator';
+
+            fetch(app.dataset.linkEndpoint, {
+                method: 'POST',
+                headers: headersForm(),
+                body: toForm({ room_id: roomId, name: name, is_admin: isAdmin ? '1' : '' })
+            })
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                    if (!data.status) { window.alert(data.msg || 'Error'); return; }
+                    var result = document.getElementById('witty-link-result');
+                    result.innerHTML += '<div class="witty-video-link-block"><strong>' +
+                        (isAdmin ? '{{ 'mautic.witty.video.rooms.presenter'|trans|e('js') }}' : '{{ 'mautic.witty.video.rooms.listener_link'|trans|e('js') }}') +
+                        '</strong><div class="url"><a href="' + escapeHtml(data.join_url) + '" target="_blank">' + escapeHtml(data.join_url) + '</a></div></div>';
+                });
+        }
+
+        document.getElementById('witty-gen-listener').addEventListener('click', function () { generate(false); });
+        document.getElementById('witty-gen-presenter').addEventListener('click', function () { generate(true); });
+    }
+
+    function endRoom(roomId) {
+        if (!window.confirm('{{ 'mautic.witty.video.rooms.end_confirm'|trans|e('js') }} (' + roomId + ')')) { return; }
+
+        fetch(app.dataset.endEndpoint, { method: 'POST', headers: headersForm(), body: toForm({ room_id: roomId }) })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                if (!data.status) { window.alert(data.msg || 'Error'); return; }
+                loadRooms();
+            });
+    }
+
+    document.getElementById('witty-video-create-btn').addEventListener('click', openCreate);
+
+    filterInput.addEventListener('input', function () {
+        filterTerm = filterInput.value.trim().toLowerCase();
+        renderRooms();
+    });
+
+    loadRooms();
+})();
+</script>
+{% endblock %}

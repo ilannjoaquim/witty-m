@@ -1,0 +1,298 @@
+{% extends '@MauticCore/Default/content.html.twig' %}
+
+{% block mauticContent 'wittyVideorecordings' %}
+
+{% block headerTitle %}{{ 'mautic.witty.video.recordings.header'|trans }}{% endblock %}
+
+{% block content %}
+<style>
+    #witty-video-app h3 { font-size: 15px; margin: 22px 0 10px; }
+    #witty-video-app h3:first-of-type { margin-top: 0; }
+    .witty-video-modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 1050; align-items: flex-start; justify-content: center; padding: 60px 16px; overflow-y: auto; }
+    .witty-video-modal-overlay.open { display: flex; }
+    .witty-video-modal { background: #fff; border-radius: 4px; width: 100%; max-width: 480px; box-shadow: 0 2px 18px rgba(0,0,0,.2); }
+    .witty-video-modal-body { padding: 20px 24px; }
+    .witty-video-modal-body h2 { margin: 0 0 18px; font-size: 20px; font-weight: 400; }
+    .witty-video-modal .form-group { margin-bottom: 12px; }
+    .witty-video-modal label { display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px; }
+    .witty-video-modal-footer { display: flex; }
+    .witty-video-modal-footer .btn { flex: 1; border-radius: 0; justify-content: center; }
+    .witty-video-modal-footer .btn:first-child { border-bottom-left-radius: 4px; }
+    .witty-video-modal-footer .btn:last-child { border-bottom-right-radius: 4px; }
+</style>
+
+<div id="witty-video-app"
+     data-configured="{{ isConfigured ? '1' : '0' }}"
+     data-data-endpoint="{{ path('witty_video_recordings_data') }}"
+     data-delete-endpoint="{{ path('witty_video_recordings_delete') }}"
+     data-download-endpoint="{{ path('witty_video_recordings_download') }}"
+     data-to-asset-endpoint="{{ path('witty_video_recordings_to_asset') }}"
+     data-artifact-delete-endpoint="{{ path('witty_video_artifacts_delete') }}"
+     data-artifact-download-endpoint="{{ path('witty_video_artifacts_download') }}">
+
+    {% if not isConfigured %}
+        <div class="alert alert-warning">{{ 'mautic.witty.video.not_configured'|trans }}</div>
+    {% else %}
+        <div class="input-group d-flex mb-md">
+            <span class="input-group-addon"><i class="ri-search-line" aria-hidden="true"></i></span>
+            <input type="search" id="witty-video-filter" class="form-control search" placeholder="{{ 'mautic.witty.video.filter'|trans }}" autocomplete="off">
+        </div>
+
+        <h3>{{ 'mautic.witty.video.recordings.recordings_title'|trans }}</h3>
+        <div class="panel panel-default">
+            <div id="witty-video-recordings"></div>
+        </div>
+
+        <h3>{{ 'mautic.witty.video.recordings.artifacts_title'|trans }}</h3>
+        <div class="panel panel-default">
+            <div id="witty-video-artifacts"></div>
+        </div>
+    {% endif %}
+
+    <div id="witty-video-overlay" class="witty-video-modal-overlay">
+        <div class="witty-video-modal" id="witty-video-modal"></div>
+    </div>
+</div>
+
+<script>
+(function () {
+    var app = document.getElementById('witty-video-app');
+    if (!app || app.dataset.wittyReady === '1') { return; }
+    app.dataset.wittyReady = '1';
+
+    if (app.dataset.configured !== '1') { return; }
+
+    var recordingsEl = document.getElementById('witty-video-recordings');
+    var artifactsEl   = document.getElementById('witty-video-artifacts');
+    var overlay       = document.getElementById('witty-video-overlay');
+    var modal         = document.getElementById('witty-video-modal');
+    var filterInput   = document.getElementById('witty-video-filter');
+    var recordingItems = [];
+    var artifactItems  = [];
+    var filterTerm      = '';
+
+    function matchesFilter(entry) {
+        if (!filterTerm) { return true; }
+        return (entry.room_id || '').toLowerCase().indexOf(filterTerm) !== -1;
+    }
+
+    function headersForm() {
+        return { 'X-Requested-With': 'XMLHttpRequest', 'X-CSRF-Token': window.mauticAjaxCsrf || '' };
+    }
+
+    function toForm(data) {
+        var params = new URLSearchParams();
+        Object.keys(data).forEach(function (key) { params.append(key, data[key]); });
+        return params;
+    }
+
+    function escapeHtml(value) {
+        var div = document.createElement('div');
+        div.textContent = value == null ? '' : String(value);
+        return div.innerHTML;
+    }
+
+    // L'API plugNmeet mele des secondes Unix et des chaines ISO 8601 selon
+    // l'endpoint : on gere les deux plutot que de supposer un format unique.
+    function formatDate(value) {
+        if (!value) { return '—'; }
+        if (/^\d+$/.test(String(value))) { value = Number(value) * 1000; }
+        var date = new Date(value);
+        return isNaN(date.getTime()) ? String(value) : date.toLocaleString();
+    }
+
+    function formatBytes(mb) {
+        var bytes = (mb || 0) * 1024 * 1024;
+        if (bytes <= 0) { return '—'; }
+        var units = ['B', 'KB', 'MB', 'GB'];
+        var i = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1024)));
+        return (bytes / Math.pow(1024, i)).toFixed(1) + ' ' + units[i];
+    }
+
+    function openModal(html) {
+        modal.innerHTML = html;
+        overlay.classList.add('open');
+    }
+
+    function closeModal() {
+        overlay.classList.remove('open');
+        modal.innerHTML = '';
+    }
+
+    overlay.addEventListener('click', function (event) {
+        if (event.target === overlay) { closeModal(); }
+    });
+
+    function load() {
+        fetch(app.dataset.dataEndpoint, { headers: headersForm() })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                if (!data.status) {
+                    recordingsEl.innerHTML = '<div class="alert alert-danger">' + escapeHtml(data.msg) + '</div>';
+                    artifactsEl.innerHTML = '';
+                    return;
+                }
+                recordingItems = (data.recordings || {}).recordings_list || [];
+                artifactItems  = (data.artifacts || {}).artifacts_list || [];
+                renderRecordings();
+                renderArtifacts();
+            })
+            .catch(function (err) {
+                recordingsEl.innerHTML = '<div class="alert alert-danger">' + escapeHtml(err.message) + '</div>';
+            });
+    }
+
+    function renderRecordings() {
+        var items = recordingItems.filter(matchesFilter);
+
+        if (!recordingItems.length) {
+            recordingsEl.innerHTML = '<p class="text-muted pa-md">{{ 'mautic.witty.video.recordings.empty'|trans|e('js') }}</p>';
+            return;
+        }
+
+        if (!items.length) {
+            recordingsEl.innerHTML = '<p class="text-muted pa-md">{{ 'mautic.witty.video.filter_empty'|trans|e('js') }}</p>';
+            return;
+        }
+
+        recordingsEl.innerHTML =
+            '<div class="table-responsive"><table class="table table-hover"><thead><tr>' +
+                '<th>{{ 'mautic.witty.video.recordings.room'|trans|e('js') }}</th>' +
+                '<th>{{ 'mautic.witty.video.recordings.created'|trans|e('js') }}</th>' +
+                '<th>{{ 'mautic.witty.video.recordings.size'|trans|e('js') }}</th>' +
+                '<th></th>' +
+            '</tr></thead><tbody>' +
+            items.map(function (r) {
+                return '<tr>' +
+                    '<td>' + escapeHtml(r.room_id) + '</td>' +
+                    '<td>' + formatDate(r.creation_time) + '</td>' +
+                    '<td>' + formatBytes(r.file_size) + '</td>' +
+                    '<td class="text-right">' +
+                        '<a class="btn btn-secondary btn-nospin" size="sm" href="' + app.dataset.downloadEndpoint + '?record_id=' + encodeURIComponent(r.record_id) + '" target="_blank">{{ 'mautic.witty.video.recordings.download'|trans|e('js') }}</a> ' +
+                        '<button class="btn btn-secondary btn-nospin" size="sm" data-action="to-asset" data-id="' + escapeHtml(r.record_id) + '" type="button">{{ 'mautic.witty.video.recordings.to_asset'|trans|e('js') }}</button> ' +
+                        '<button class="btn btn-primary btn-danger btn-nospin" size="sm" data-action="delete-recording" data-id="' + escapeHtml(r.record_id) + '" type="button">{{ 'mautic.witty.video.recordings.delete'|trans|e('js') }}</button>' +
+                    '</td>' +
+                '</tr>';
+            }).join('') +
+            '</tbody></table></div>';
+
+        recordingsEl.querySelectorAll('[data-action="delete-recording"]').forEach(function (el) {
+            el.addEventListener('click', function () { deleteRecording(el.dataset.id); });
+        });
+        recordingsEl.querySelectorAll('[data-action="to-asset"]').forEach(function (el) {
+            el.addEventListener('click', function () { openToAsset(el.dataset.id); });
+        });
+    }
+
+    function renderArtifacts() {
+        var items = artifactItems.filter(matchesFilter);
+
+        if (!artifactItems.length) {
+            artifactsEl.innerHTML = '<p class="text-muted pa-md">{{ 'mautic.witty.video.recordings.artifacts_empty'|trans|e('js') }}</p>';
+            return;
+        }
+
+        if (!items.length) {
+            artifactsEl.innerHTML = '<p class="text-muted pa-md">{{ 'mautic.witty.video.filter_empty'|trans|e('js') }}</p>';
+            return;
+        }
+
+        artifactsEl.innerHTML =
+            '<div class="table-responsive"><table class="table table-hover"><thead><tr>' +
+                '<th>{{ 'mautic.witty.video.recordings.room'|trans|e('js') }}</th>' +
+                '<th>{{ 'mautic.witty.video.recordings.type'|trans|e('js') }}</th>' +
+                '<th>{{ 'mautic.witty.video.recordings.created'|trans|e('js') }}</th>' +
+                '<th></th>' +
+            '</tr></thead><tbody>' +
+            items.map(function (a) {
+                return '<tr>' +
+                    '<td>' + escapeHtml(a.room_id) + '</td>' +
+                    '<td>' + escapeHtml(a.type) + '</td>' +
+                    '<td>' + formatDate(a.created) + '</td>' +
+                    '<td class="text-right">' +
+                        '<a class="btn btn-secondary btn-nospin" size="sm" href="' + app.dataset.artifactDownloadEndpoint + '?artifact_id=' + encodeURIComponent(a.artifact_id) + '" target="_blank">{{ 'mautic.witty.video.recordings.download'|trans|e('js') }}</a> ' +
+                        '<button class="btn btn-primary btn-danger btn-nospin" size="sm" data-action="delete-artifact" data-id="' + escapeHtml(a.artifact_id) + '" type="button">{{ 'mautic.witty.video.recordings.delete'|trans|e('js') }}</button>' +
+                    '</td>' +
+                '</tr>';
+            }).join('') +
+            '</tbody></table></div>';
+
+        artifactsEl.querySelectorAll('[data-action="delete-artifact"]').forEach(function (el) {
+            el.addEventListener('click', function () { deleteArtifact(el.dataset.id); });
+        });
+    }
+
+    function deleteRecording(recordId) {
+        if (!window.confirm('{{ 'mautic.witty.video.recordings.delete_confirm'|trans|e('js') }}')) { return; }
+
+        fetch(app.dataset.deleteEndpoint, { method: 'POST', headers: headersForm(), body: toForm({ record_id: recordId }) })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                if (!data.status) { window.alert(data.msg || 'Error'); return; }
+                load();
+            });
+    }
+
+    function deleteArtifact(artifactId) {
+        if (!window.confirm('{{ 'mautic.witty.video.recordings.delete_confirm'|trans|e('js') }}')) { return; }
+
+        fetch(app.dataset.artifactDeleteEndpoint, { method: 'POST', headers: headersForm(), body: toForm({ artifact_id: artifactId }) })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                if (!data.status) { window.alert(data.msg || 'Error'); return; }
+                load();
+            });
+    }
+
+    function openToAsset(recordId) {
+        openModal(
+            '<div class="witty-video-modal-body">' +
+                '<h2>{{ 'mautic.witty.video.recordings.to_asset'|trans|e('js') }}</h2>' +
+                '<p class="text-muted">' + escapeHtml(recordId) + '</p>' +
+                '<div class="form-group"><label>{{ 'mautic.witty.video.recordings.asset_title'|trans|e('js') }}</label>' +
+                    '<input type="text" id="witty-asset-title" class="form-control"></div>' +
+                '<div id="witty-asset-result"></div>' +
+            '</div>' +
+            '<div class="witty-video-modal-footer">' +
+                '<button class="btn btn-primary" id="witty-asset-submit" type="button"><i class="ri-check-line"></i> <span>{{ 'mautic.witty.video.recordings.to_asset'|trans|e('js') }}</span></button>' +
+                '<button class="btn btn-secondary" id="witty-asset-cancel" type="button"><i class="ri-close-line"></i> <span>{{ 'mautic.witty.video.close'|trans|e('js') }}</span></button>' +
+            '</div>'
+        );
+
+        document.getElementById('witty-asset-cancel').addEventListener('click', closeModal);
+        document.getElementById('witty-asset-submit').addEventListener('click', function () {
+            var button = document.getElementById('witty-asset-submit');
+            var title  = document.getElementById('witty-asset-title').value.trim();
+            var result = document.getElementById('witty-asset-result');
+
+            button.disabled = true;
+            result.innerHTML = '<p>{{ 'mautic.witty.video.recordings.to_asset_progress'|trans|e('js') }}</p>';
+
+            fetch(app.dataset.toAssetEndpoint, {
+                method: 'POST',
+                headers: headersForm(),
+                body: toForm({ record_id: recordId, title: title })
+            })
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                    button.disabled = false;
+                    if (!data.status) { result.innerHTML = '<p class="text-danger">' + escapeHtml(data.msg) + '</p>'; return; }
+                    result.innerHTML = '<p>{{ 'mautic.witty.video.recordings.to_asset_done'|trans|e('js') }} <a href="' + escapeHtml(data.asset.url) + '" target="_blank">' + escapeHtml(data.asset.title) + '</a></p>';
+                })
+                .catch(function (err) {
+                    button.disabled = false;
+                    result.innerHTML = '<p class="text-danger">' + escapeHtml(err.message) + '</p>';
+                });
+        });
+    }
+
+    filterInput.addEventListener('input', function () {
+        filterTerm = filterInput.value.trim().toLowerCase();
+        renderRecordings();
+        renderArtifacts();
+    });
+
+    load();
+})();
+</script>
+{% endblock %}

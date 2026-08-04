@@ -168,6 +168,51 @@ class ConversationManager
         return $transcript;
     }
 
+    /**
+     * Recherche un texte precis dans l'historique de l'utilisateur courant.
+     * Renvoie un extrait centre sur la premiere occurrence, pas le message
+     * entier : ca reste lisible dans une liste de resultats.
+     *
+     * @return array<int, array{conversation_id:int, title:string, role:string, snippet:string, dateAdded:string}>
+     */
+    public function search(string $term, int $limit = 25): array
+    {
+        $user = $this->getCurrentUser();
+        $term = trim($term);
+
+        if (null === $user || '' === $term) {
+            return [];
+        }
+
+        $rows = $this->getRepository()->searchMessages((int) $user->getId(), $term, $limit);
+
+        return array_map(
+            static fn (array $row): array => [
+                'conversation_id' => (int) $row['conversation_id'],
+                'title'           => '' !== $row['title'] ? $row['title'] : 'Sans titre',
+                'role'            => $row['role'],
+                'snippet'         => self::snippet((string) $row['content'], $term),
+                'dateAdded'       => $row['dateAdded']->format('c'),
+            ],
+            $rows,
+        );
+    }
+
+    private static function snippet(string $content, string $term, int $context = 60): string
+    {
+        $position = mb_stripos($content, $term);
+
+        if (false === $position) {
+            return mb_substr($content, 0, $context * 2);
+        }
+
+        $start  = max(0, $position - $context);
+        $length = mb_strlen($term) + (2 * $context);
+        $slice  = mb_substr($content, $start, $length);
+
+        return (0 < $start ? '…' : '').trim($slice).(mb_strlen($content) > $start + $length ? '…' : '');
+    }
+
     private function getRepository(): WittyConversationRepository
     {
         /** @var WittyConversationRepository $repository */

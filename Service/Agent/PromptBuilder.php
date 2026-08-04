@@ -6,6 +6,7 @@ namespace MauticPlugin\WittyBundle\Service\Agent;
 
 use Mautic\CoreBundle\Helper\CoreParametersHelper;
 use Mautic\CoreBundle\Helper\UserHelper;
+use MauticPlugin\WittyBundle\Service\Skill\SkillManager;
 use MauticPlugin\WittyBundle\Service\WittyConfig;
 
 class PromptBuilder
@@ -14,6 +15,7 @@ class PromptBuilder
         private UserHelper $userHelper,
         private CoreParametersHelper $parameters,
         private WittyConfig $config,
+        private SkillManager $skills,
     ) {
     }
 
@@ -22,6 +24,8 @@ class PromptBuilder
         $user     = $this->userHelper->getUser();
         $userName = method_exists($user, 'getName') ? (string) $user->getName() : 'utilisateur';
         $siteUrl  = (string) $this->parameters->get('site_url');
+
+        $skillsList = $this->buildSkillsList();
 
         $confirmation = $this->config->requiresConfirmation()
             ? "Le mode confirmation est ACTIF. Tout outil d ecriture renvoie d abord status=confirmation_required avec un apercu. "
@@ -39,6 +43,8 @@ class PromptBuilder
 
             Regles de travail :
             - Avant de creer quoi que ce soit, utilise list_entities pour verifier si l objet existe deja et pour recuperer les identifiants numeriques. N invente jamais un ID.
+            - Pour un email, regarde d abord list_email_templates : si un template correspond au besoin, passe par create_email_from_template et respecte les consignes de chaque emplacement. Ne recopie jamais le HTML d un template a la main.
+            - Meme logique pour une landing page avec du JavaScript fonctionnel (compte a rebours, etats dynamiques) : regarde list_page_templates et passe par create_page_from_template. Ces pages sont enregistrees en mode code source expres, ne propose jamais de les ouvrir dans un builder visuel.
             - Enchaine les outils dans l ordre logique : un email doit exister avant d etre reference dans une campagne.
             - Une attente n est pas une etape de campagne dans Mautic : le delai se declare sur l etape suivante via delay_days / delay_hours.
             - Les objets sont crees non publies. Signale-le et propose a l utilisateur de verifier dans l interface.
@@ -46,8 +52,35 @@ class PromptBuilder
             - Si un outil renvoie status=error, explique l erreur simplement et propose une correction. Ne boucle pas sur le meme appel.
             - Termine toujours par un message en texte clair : liens et identifiants crees, et prochaine action suggeree.
 
+            {$skillsList}
+
             {$confirmation}
             PROMPT;
+    }
+
+    /**
+     * Noms + descriptions de tous les skills (playbooks propres a
+     * l'entreprise), jamais leur contenu : ca resterait trop lourd a envoyer
+     * a chaque tour. L'agent appelle read_skill lui-meme s'il juge un skill
+     * pertinent, ou si l'utilisateur le demande explicitement.
+     */
+    private function buildSkillsList(): string
+    {
+        $skills = $this->skills->listForPrompt();
+
+        if ([] === $skills) {
+            return 'Aucun skill (playbook d entreprise) n est configure pour le moment.';
+        }
+
+        $lines = array_map(
+            static fn (array $skill): string => sprintf('- %s : %s', $skill['name'], $skill['description']),
+            $skills,
+        );
+
+        return "Skills disponibles (playbooks/strategies propres a l entreprise). Ne lis PAS leur contenu par defaut : "
+            ."appelle read_skill(name) toi-meme seulement si l un d eux semble pertinent pour la demande en cours, ou si "
+            ."l utilisateur te demande explicitement de suivre un skill/playbook/strategie precis.\n"
+            .implode("\n", $lines);
     }
 
     private function today(): string
