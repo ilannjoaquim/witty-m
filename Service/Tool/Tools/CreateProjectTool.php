@@ -63,6 +63,15 @@ class CreateProjectTool extends AbstractTool
             return ['status' => 'error', 'error' => 'name est obligatoire.'];
         }
 
+        // Le nom est unique en base (contrainte SQL) mais Mautic ne le verifie
+        // qu'a la soumission du formulaire, jamais dans ProjectModel::saveEntity().
+        // Sans ce controle, un doublon fait echouer le flush Doctrine, ce qui
+        // ferme l'EntityManager pour le reste de la requete (et donc de tous
+        // les outils d'ecriture suivants dans le meme tour de l'agent).
+        if ($this->projectModel->getRepository()->checkProjectNameExists($name)) {
+            return ['status' => 'error', 'error' => sprintf("Un projet nomme '%s' existe deja.", $name)];
+        }
+
         if ($this->config->requiresConfirmation() && true !== ($arguments['confirmed'] ?? false)) {
             return $this->confirmationRequired(['type' => 'project', 'name' => $name]);
         }
