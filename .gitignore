@@ -5,3 +5,8 @@
 /*.zip
 
 .claude/
+dev/
+vendor/
+node_modules/
+var/
+.env
