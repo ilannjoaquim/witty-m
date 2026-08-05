@@ -195,6 +195,13 @@ abstract class AbstractHttpProvider implements LlmProviderInterface
                     $schema[$key][$name] = $this->sanitizeSchema($definition, $stripAdditionalProperties);
                 }
             }
+
+            // PHP ne distingue pas tableau vide et objet vide : sans ceci,
+            // json_encode() serialise `properties: []` au lieu de `{}` et le
+            // fournisseur rejette le schema ("[] is not of type object").
+            if ([] === $schema[$key]) {
+                $schema[$key] = new \stdClass();
+            }
         }
 
         return $schema;
