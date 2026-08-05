@@ -10,6 +10,7 @@ use Mautic\FormBundle\Entity\Form;
 use Mautic\FormBundle\Model\FormModel;
 use MauticPlugin\WittyBundle\EventListener\FormSubscriber;
 use MauticPlugin\WittyBundle\Service\PlugNmeet\MeetInvitationCreator;
+use MauticPlugin\WittyBundle\Service\PlugNmeet\MeetSlotAvailabilityCalculator;
 use MauticPlugin\WittyBundle\Service\Tool\AbstractTool;
 use MauticPlugin\WittyBundle\Service\WittyConfig;
 
@@ -136,15 +137,32 @@ class CreateFormTool extends AbstractTool
                         'allowed_file_size_mb' => ['type' => 'integer', 'description' => 'Pour type=file : taille max en Mo. Defaut 6.'],
                         'slot_picker' => [
                             'type'        => 'object',
-                            'description' => 'Requis si type='.FormSubscriber::SLOT_PICKER_FIELD_TYPE.' : regle de recurrence des creneaux proposes.',
+                            'description' => 'Requis si type='.FormSubscriber::SLOT_PICKER_FIELD_TYPE.' : regle de recurrence des creneaux proposes. '
+                                .'A la reservation, deux champs contact sont automatiquement renseignes (cf. EventListener/PluginSubscriber.php), '
+                                .'en toutes lettres, dans la langue du formulaire (anglais par defaut, francais si le formulaire est configure en '
+                                .'francais) : meeting_scheduled_organizer_at (heure formatee dans le fuseau "timezone" ci-dessous, ex. "Monday 10 '
+                                .'August 2026 at 09:00 (UTC+01:00)") et meeting_scheduled_visitor_at (meme heure, formatee dans le fuseau que le '
+                                .'visiteur a choisi sur le formulaire). Utilisables via {contactfield=meeting_scheduled_organizer_at} / '
+                                .'{contactfield=meeting_scheduled_visitor_at} dans le contenu de n importe quel email (email.send.lead pour le '
+                                .'prospect avec sa propre heure, email.send.user pour l equipe avec l heure de l organisateur, aucun calcul a faire). '
+                                .'Un troisieme champ contact existe deja, meeting_scheduled_at (type datetime, une vraie date exploitable dans un '
+                                .'filtre de segment ou une campagne type "3 jours avant le RDV") : pour le renseigner aussi, mets mapped_object=contact '
+                                .'et mapped_field=meeting_scheduled_at sur CE champ '.FormSubscriber::SLOT_PICKER_FIELD_TYPE.' lui-meme.',
                             'properties'  => [
                                 'days_of_week' => [
                                     'type'        => 'array',
                                     'items'       => ['type' => 'integer'],
                                     'description' => 'Jours ouvrables, 1=lundi ... 7=dimanche. Defaut [1,2,3,4,5].',
                                 ],
-                                'start_time' => ['type' => 'string', 'description' => 'Heure de debut quotidienne, format HH:mm. Defaut 09:00.'],
-                                'end_time'   => ['type' => 'string', 'description' => 'Heure de fin quotidienne, format HH:mm. Defaut 17:00.'],
+                                'timezone' => [
+                                    'type'        => 'string',
+                                    'enum'        => array_values(MeetSlotAvailabilityCalculator::utcOffsetChoices()),
+                                    'description' => 'Decalage UTC dans lequel start_time/end_time sont exprimes, ex. "+01:00". '
+                                        .'Defaut '.MeetSlotAvailabilityCalculator::DEFAULT_TIMEZONE.' (UTC). '
+                                        .'Cote visiteur du formulaire, le widget affiche les creneaux dans le decalage que CE dernier choisit lui-meme, independamment de celui-ci.',
+                                ],
+                                'start_time' => ['type' => 'string', 'description' => 'Heure de debut quotidienne, format HH:mm, dans le fuseau "timezone" ci-dessus. Defaut 09:00.'],
+                                'end_time'   => ['type' => 'string', 'description' => 'Heure de fin quotidienne, format HH:mm, dans le fuseau "timezone" ci-dessus. Defaut 17:00.'],
                                 'slot_duration_minutes' => ['type' => 'integer', 'description' => 'Duree d un creneau, en minutes. Defaut 30.'],
                                 'buffer_days'            => ['type' => 'integer', 'description' => 'Delai de securite avant le premier creneau reservable, en jours. Defaut 1.'],
                             ],
@@ -525,12 +543,20 @@ class CreateFormTool extends AbstractTool
         $daysOfWeek = array_values(array_filter($daysOfWeek, static fn (int $day): bool => $day >= 1 && $day <= 7));
 
         return [
+            'timezone'               => $this->normalizeTimezone((string) ($config['timezone'] ?? MeetSlotAvailabilityCalculator::DEFAULT_TIMEZONE)),
             'days_of_week'           => [] !== $daysOfWeek ? $daysOfWeek : [1, 2, 3, 4, 5],
             'start_time'             => $this->normalizeTime((string) ($config['start_time'] ?? '09:00'), '09:00'),
             'end_time'               => $this->normalizeTime((string) ($config['end_time'] ?? '17:00'), '17:00'),
             'slot_duration_minutes'  => max(5, (int) ($config['slot_duration_minutes'] ?? 30)),
             'buffer_days'            => max(0, (int) ($config['buffer_days'] ?? 1)),
         ];
+    }
+
+    private function normalizeTimezone(string $value): string
+    {
+        return in_array($value, MeetSlotAvailabilityCalculator::utcOffsetChoices(), true)
+            ? $value
+            : MeetSlotAvailabilityCalculator::DEFAULT_TIMEZONE;
     }
 
     private function normalizeTime(string $value, string $default): string

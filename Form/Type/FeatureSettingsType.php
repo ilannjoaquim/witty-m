@@ -5,13 +5,17 @@ declare(strict_types=1);
 namespace MauticPlugin\WittyBundle\Form\Type;
 
 use Mautic\CoreBundle\Form\Type\YesNoButtonGroupType;
+use MauticPlugin\WittyBundle\Service\Branding\BrandingAssetManager;
 use MauticPlugin\WittyBundle\Service\WittyConfig;
 use Symfony\Component\Form\AbstractType;
+use Symfony\Component\Form\Extension\Core\Type\FileType;
 use Symfony\Component\Form\Extension\Core\Type\IntegerType;
 use Symfony\Component\Form\Extension\Core\Type\TextType;
 use Symfony\Component\Form\FormBuilderInterface;
 use Symfony\Component\Form\FormEvent;
 use Symfony\Component\Form\FormEvents;
+use Symfony\Component\HttpFoundation\File\UploadedFile;
+use Symfony\Component\Validator\Constraints\File as FileConstraint;
 
 /**
  * Onglet "Fonctionnalites" de la fiche du plugin.
@@ -37,6 +41,10 @@ class FeatureSettingsType extends AbstractType
         WittyConfig::PROVIDER_OPENAI    => 'gpt-4o',
         WittyConfig::PROVIDER_GEMINI    => 'gemini-2.5-flash',
     ];
+
+    public function __construct(private BrandingAssetManager $brandingAssets)
+    {
+    }
 
     public function buildForm(FormBuilderInterface $builder, array $options): void
     {
@@ -113,5 +121,64 @@ class FeatureSettingsType extends AbstractType
             ],
             'label_attr' => ['class' => 'control-label'],
         ]);
+
+        // Affichage : logo et favicon personnalises. 'mapped' => false : ce sont
+        // des UploadedFile, pas des scalaires serialisables tels quels dans
+        // feature_settings — le SUBMIT ci-dessous les deplace sur disque et
+        // n'ecrit que le nom de fichier resultant dans les donnees du formulaire.
+        // Rien de soumis = on garde le fichier deja en place (pas de re-upload
+        // obligatoire a chaque enregistrement).
+        $builder->add('witty_logo', FileType::class, [
+            'label'      => 'mautic.witty.config.display.logo',
+            'mapped'     => false,
+            'required'   => false,
+            'attr'       => ['tooltip' => 'mautic.witty.config.display.logo.tooltip'],
+            'label_attr' => ['class' => 'control-label'],
+            'constraints' => [
+                new FileConstraint([
+                    'maxSize'          => '2M',
+                    'mimeTypes'        => ['image/png', 'image/jpeg', 'image/svg+xml', 'image/webp'],
+                    'mimeTypesMessage' => 'mautic.witty.config.display.logo.invalid_type',
+                ]),
+            ],
+        ]);
+
+        $builder->add('witty_favicon', FileType::class, [
+            'label'      => 'mautic.witty.config.display.favicon',
+            'mapped'     => false,
+            'required'   => false,
+            'attr'       => ['tooltip' => 'mautic.witty.config.display.favicon.tooltip'],
+            'label_attr' => ['class' => 'control-label'],
+            'constraints' => [
+                new FileConstraint([
+                    'maxSize'          => '1M',
+                    'mimeTypes'        => ['image/x-icon', 'image/vnd.microsoft.icon', 'image/png'],
+                    'mimeTypesMessage' => 'mautic.witty.config.display.favicon.invalid_type',
+                ]),
+            ],
+        ]);
+
+        $builder->addEventListener(FormEvents::SUBMIT, function (FormEvent $event): void {
+            $form = $event->getForm();
+            $data = (array) $event->getData();
+
+            $logo = $form->get('witty_logo')->getData();
+
+            if ($logo instanceof UploadedFile) {
+                $filename = $this->brandingAssets->storeLogo($logo);
+
+                if (null !== $filename) {
+                    $data['witty_logo_filename'] = $filename;
+                }
+            }
+
+            $favicon = $form->get('witty_favicon')->getData();
+
+            if ($favicon instanceof UploadedFile) {
+                $this->brandingAssets->storeFavicon($favicon);
+            }
+
+            $event->setData($data);
+        });
     }
 }

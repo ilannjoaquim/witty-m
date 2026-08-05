@@ -196,6 +196,26 @@ class WittyConfig
     }
 
     /**
+     * Nom de fichier du logo personnalise (stocke sous media/images/ par
+     * FeatureSettingsType a l'enregistrement), vide si aucun n'a ete importe.
+     * Gate sur isPublished() : desactiver le plugin revient a l'affichage
+     * Mautic par defaut sans avoir a supprimer le fichier.
+     */
+    public function getCustomLogoFilename(): string
+    {
+        if (!$this->isPublished()) {
+            return '';
+        }
+
+        return trim((string) ($this->getFeatureSettings()['witty_logo_filename'] ?? ''));
+    }
+
+    public function hasCustomLogo(): bool
+    {
+        return '' !== $this->getCustomLogoFilename();
+    }
+
+    /**
      * @return mixed[]
      */
     private function getFeatureSettings(): array

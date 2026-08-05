@@ -48,6 +48,10 @@ class SkillController extends CommonController
                         static fn ($project): array => ['id' => $project->getId(), 'name' => $project->getName()],
                         $skill->getProjects()->toArray(),
                     )),
+                    'tags'          => array_values(array_map(
+                        static fn ($tag): array => ['id' => $tag->getId(), 'name' => $tag->getTag()],
+                        $skill->getTags()->toArray(),
+                    )),
                     'tokens'        => $skill->getEstimatedTokens(),
                     'createdBy'     => $skill->getCreatedBy()?->getName(),
                     'dateModified'  => $skill->getDateModified()->format('c'),
@@ -57,6 +61,7 @@ class SkillController extends CommonController
             'options' => [
                 'categories' => $taxonomy->categoryChoices('witty_skill'),
                 'projects'   => $taxonomy->projectChoices(),
+                'tags'       => $taxonomy->tagChoices(),
             ],
         ]);
     }
@@ -69,6 +74,7 @@ class SkillController extends CommonController
         $content     = (string) $request->request->get('content', '');
         $categoryId  = (int) $request->request->get('category_id', 0);
         $projectIds  = (array) $request->request->all('project_ids');
+        $tagIds      = (array) $request->request->all('tag_ids');
 
         if ('' === $name) {
             return new JsonResponse(['status' => false, 'msg' => 'Le nom est obligatoire.'], Response::HTTP_BAD_REQUEST);
@@ -90,6 +96,7 @@ class SkillController extends CommonController
         $skill->setContent($content);
         $skill->setCategory($taxonomy->resolveCategory($categoryId > 0 ? $categoryId : null));
         $skill->setProjects($taxonomy->resolveProjects($projectIds));
+        $skill->setTags($taxonomy->resolveTags($tagIds));
 
         $skills->save($skill);
 

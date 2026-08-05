@@ -4,9 +4,12 @@ declare(strict_types=1);
 
 namespace MauticPlugin\WittyBundle\Entity;
 
+use Doctrine\Common\Collections\ArrayCollection;
+use Doctrine\Common\Collections\Collection;
 use Doctrine\ORM\Mapping as ORM;
 use Mautic\CategoryBundle\Entity\Category;
 use Mautic\CoreBundle\Doctrine\Mapping\ClassMetadataBuilder;
+use Mautic\LeadBundle\Entity\Tag;
 use Mautic\ProjectBundle\Entity\ProjectTrait;
 use Mautic\UserBundle\Entity\User;
 
@@ -30,6 +33,9 @@ class WittyRoom
 
     private ?Category $category = null;
 
+    /** @var Collection<int, Tag> */
+    private Collection $tags;
+
     private ?User $createdBy = null;
 
     private \DateTimeInterface $dateAdded;
@@ -40,6 +46,7 @@ class WittyRoom
     {
         $this->dateAdded    = new \DateTimeImmutable();
         $this->dateModified = new \DateTimeImmutable();
+        $this->tags         = new ArrayCollection();
         $this->initializeProjects();
     }
 
@@ -59,6 +66,18 @@ class WittyRoom
 
         $builder->addCategory();
         self::addProjectsField($builder, 'witty_room_projects_xref', 'witty_room_id');
+
+        $builder->createManyToMany('tags', Tag::class)
+            ->setJoinTable('witty_room_tags_xref')
+            ->addInverseJoinColumn('tag_id', 'id', false)
+            ->addJoinColumn('witty_room_id', 'id', false, false, 'CASCADE')
+            ->setOrderBy(['tag' => 'ASC'])
+            ->setIndexBy('tag')
+            ->fetchLazy()
+            ->cascadeMerge()
+            ->cascadePersist()
+            ->cascadeDetach()
+            ->build();
 
         $builder->addNamedField('roomId', 'string', 'room_id');
         $builder->addField('title', 'string');
@@ -103,6 +122,24 @@ class WittyRoom
     public function setCategory(?Category $category): self
     {
         $this->category = $category;
+
+        return $this;
+    }
+
+    /**
+     * @return Collection<int, Tag>
+     */
+    public function getTags(): Collection
+    {
+        return $this->tags;
+    }
+
+    /**
+     * @param Collection<int, Tag> $tags
+     */
+    public function setTags(Collection $tags): self
+    {
+        $this->tags = $tags;
 
         return $this;
     }

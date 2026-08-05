@@ -93,7 +93,7 @@
     var filterInput = document.getElementById('witty-video-filter');
     var allRooms    = [];
     var filterTerm  = '';
-    var options     = { categories: [], projects: [] };
+    var options     = { categories: [], projects: [], tags: [] };
 
     var LOCK_FIELDS = [
         ['lock_microphone', {{ 'mautic.witty.video.lock.microphone'|trans|json_encode|raw }}, false],
@@ -160,7 +160,7 @@
             .then(function (data) {
                 if (!data.status) { renderError(data.msg); return; }
                 allRooms = data.rooms || [];
-                options  = data.options || { categories: [], projects: [] };
+                options  = data.options || { categories: [], projects: [], tags: [] };
                 renderRooms();
             })
             .catch(function (err) { renderError(err.message); });
@@ -199,6 +199,9 @@
             tags += '<span class="label label-default">' + escapeHtml(witty.category || '{{ 'mautic.core.form.uncategorized'|trans|e('js') }}') + '</span>';
             (witty.projects || []).forEach(function (name) {
                 tags += '<span class="label label-info">' + escapeHtml(name) + '</span>';
+            });
+            (witty.tags || []).forEach(function (name) {
+                tags += '<span class="label label-tag">' + escapeHtml(name) + '</span>';
             });
 
             return '' +
@@ -250,6 +253,10 @@
             return '<option value="' + p.id + '">' + escapeHtml(p.name) + '</option>';
         }).join('');
 
+        var tagOptions = options.tags.map(function (t) {
+            return '<option value="' + t.id + '">' + escapeHtml(t.name) + '</option>';
+        }).join('');
+
         openModal(
             '<div class="witty-video-modal-body">' +
                 '<h2>{{ 'mautic.witty.video.rooms.create'|trans|e('js') }}</h2>' +
@@ -272,6 +279,14 @@
                                 ' data-allow-add="true">' + projectOptions + '</select>' +
                         '</div>' +
                     '</div>' +
+                    '<div class="form-group"><label for="witty-room-tags">{{ 'mautic.lead.tags'|trans|e('js') }}</label>' +
+                        '<div class="choice-wrapper">' +
+                            '<select id="witty-room-tags" name="tags[]" autocomplete="off" multiple="multiple"' +
+                                ' data-placeholder="{{ 'mautic.lead.tags.select_or_create'|trans|e('js') }}"' +
+                                ' data-no-results-text="{{ 'mautic.lead.tags.enter_to_create'|trans|e('js') }}"' +
+                                ' data-allow-add="true">' + tagOptions + '</select>' +
+                        '</div>' +
+                    '</div>' +
                 '</div>' +
                 '<div class="form-group"><label>{{ 'mautic.witty.video.rooms.lock_settings'|trans|e('js') }}</label>' + lockRows + '</div>' +
             '</div>' +
@@ -287,9 +302,16 @@
         roomCategorySelect.addEventListener('change', function () {
             Mautic.loadAjaxModalBySelectValue(roomCategorySelect, 'new', app.dataset.categoryNewUrl, categoryModalHeader);
         });
+
+        var roomTagsSelect = document.getElementById('witty-room-tags');
+        roomTagsSelect.addEventListener('change', function () {
+            if (window.Mautic && typeof Mautic.createLeadTag === 'function') { Mautic.createLeadTag(roomTagsSelect); }
+        });
+
         if (window.Mautic && typeof Mautic.activateChosenSelect === 'function') {
             Mautic.activateChosenSelect(roomCategorySelect);
             Mautic.activateChosenSelect(document.getElementById('witty-room-projects'));
+            Mautic.activateChosenSelect(roomTagsSelect);
         }
 
         document.getElementById('witty-room-submit').addEventListener('click', function () {
@@ -306,11 +328,15 @@
                 document.getElementById('witty-room-projects').selectedOptions,
                 function (opt) { return opt.value; }
             );
+            var tagIds = Array.prototype.map.call(
+                document.getElementById('witty-room-tags').selectedOptions,
+                function (opt) { return opt.value; }
+            );
 
             fetch(app.dataset.createEndpoint, {
                 method: 'POST',
                 headers: headersForm(),
-                body: toForm({ room_id: roomId, title: title, lock: lock, category_id: categoryId, project_ids: projectIds })
+                body: toForm({ room_id: roomId, title: title, lock: lock, category_id: categoryId, project_ids: projectIds, tag_ids: tagIds })
             })
                 .then(function (r) { return r.json(); })
                 .then(function (data) {

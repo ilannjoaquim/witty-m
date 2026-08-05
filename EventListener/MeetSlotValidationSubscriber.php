@@ -11,6 +11,7 @@ use Mautic\FormBundle\Event\SubmissionEvent;
 use Mautic\FormBundle\Event\ValidationEvent;
 use Mautic\FormBundle\FormEvents;
 use Mautic\LeadBundle\Entity\Lead;
+use Mautic\LeadBundle\Model\LeadModel;
 use MauticPlugin\WittyBundle\Entity\WittyMeetBooking;
 use MauticPlugin\WittyBundle\Service\PlugNmeet\MeetSlotAvailabilityCalculator;
 use Psr\Log\LoggerInterface;
@@ -40,11 +41,15 @@ use Symfony\Contracts\Translation\TranslatorInterface;
  */
 class MeetSlotValidationSubscriber implements EventSubscriberInterface
 {
+    /** Index = DateTime::format('N') - 1 (1=lundi ... 7=dimanche). */
+    private const WEEKDAY_KEYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+
     public function __construct(
         private MeetSlotAvailabilityCalculator $calculator,
         private EntityManagerInterface $em,
         private TranslatorInterface $translator,
         private LoggerInterface $logger,
+        private LeadModel $leadModel,
     ) {
     }
 
@@ -109,7 +114,95 @@ class MeetSlotValidationSubscriber implements EventSubscriberInterface
             }
 
             $this->reserveSlot($field, $lead, $slot);
+            $this->updateContactMeetingFields($event, $field, $lead, $slot);
         }
+    }
+
+    /**
+     * Renseigne meeting_scheduled_organizer_at et meeting_scheduled_visitor_at
+     * (cf. PluginSubscriber::provisionFields()) : deux champs contact texte,
+     * deja formates en toutes lettres avec leur decalage explicite, pour que
+     * ni l'organisateur (email.send.user) ni le prospect (email.send.lead)
+     * n'aient de calcul de fuseau a refaire a la lecture de l'email.
+     *
+     * meeting_scheduled_organizer_at reprend directement $slot : parseSlot()
+     * a deja parse la chaine ISO soumise AVEC son decalage (celui configure
+     * sur le champ, cf. widget JS), donc $slot porte deja le bon fuseau.
+     *
+     * meeting_scheduled_visitor_at a besoin du decalage que le VISITEUR a
+     * choisi sur le widget, transmis via un champ cache brut (pas un vrai
+     * champ Mautic : inutile de l'exposer comme {formfield=...}, seul ce
+     * listener le lit) nomme mauticform[<alias>__visitor_tz].
+     */
+    private function updateContactMeetingFields(SubmissionEvent $event, Field $field, ?Lead $lead, \DateTimeImmutable $slot): void
+    {
+        if (null === $lead) {
+            return;
+        }
+
+        // SubmissionEvent::getPost() renvoie deja le tableau 'mauticform'
+        // "deballe" (cf. FormBundle\Controller\PublicController::submitAction,
+        // $post = $request->request->all()['mauticform'] ?? []) : pas de
+        // cle 'mauticform' supplementaire a lire ici.
+        $post = $event->getPost();
+        $visitorOffsetRaw = (string) ($post[$field->getAlias().'__visitor_tz'] ?? '');
+        $visitorOffset    = $this->normalizeOffset($visitorOffsetRaw, $slot->format('P'));
+
+        try {
+            $visitorSlot = $slot->setTimezone(new \DateTimeZone($visitorOffset));
+        } catch (\Exception) {
+            $visitorSlot = $slot;
+        }
+
+        // Anglais par defaut pour tout formulaire, francais uniquement si la
+        // langue du formulaire (Builder > Options > Language) commence par
+        // "fr" (fr_FR, fr_CA...) : cf. Form::getLanguage().
+        $formLanguage = (string) ($event->getForm()->getLanguage() ?? '');
+        $isFrench     = str_starts_with(strtolower($formLanguage), 'fr');
+
+        $this->leadModel->setFieldValues($lead, [
+            PluginSubscriber::MEETING_ORGANIZER_TIME_FIELD_ALIAS => $this->formatMeetingTime($slot, $isFrench),
+            PluginSubscriber::MEETING_VISITOR_TIME_FIELD_ALIAS   => $this->formatMeetingTime($visitorSlot, $isFrench),
+        ], false, false);
+        $this->leadModel->saveEntity($lead);
+    }
+
+    /**
+     * Jour et date en toutes lettres ("Lundi 20 septembre 2026" /
+     * "Monday 20 September 2026"), heure au format local ("11h30" en
+     * francais, "11:30" en anglais) et decalage UTC explicite entre
+     * parentheses, langue-independant : le libelle reste sans ambiguite
+     * meme pour quelqu'un qui ne lit pas la langue du formulaire.
+     */
+    private function formatMeetingTime(\DateTimeImmutable $dt, bool $isFrench): string
+    {
+        $locale = $isFrench ? 'fr_FR' : 'en_US';
+
+        $weekday = $this->translator->trans(
+            'mautic.witty.meet.slotpicker.day.'.self::WEEKDAY_KEYS[((int) $dt->format('N')) - 1],
+            [],
+            null,
+            $locale
+        );
+        $month = $this->translator->trans('mautic.witty.meet.slotpicker.month.'.$dt->format('n'), [], null, $locale);
+
+        $datePart = sprintf('%s %s %s %s', $weekday, $dt->format('j'), $month, $dt->format('Y'));
+
+        if ($isFrench) {
+            $minutes  = (int) $dt->format('i');
+            $timePart = $dt->format('G').'h'.('0' === (string) $minutes ? '' : sprintf('%02d', $minutes));
+            $connector = 'à';
+        } else {
+            $timePart  = $dt->format('H:i');
+            $connector = 'at';
+        }
+
+        return sprintf('%s %s %s (UTC%s)', $datePart, $connector, $timePart, $dt->format('P'));
+    }
+
+    private function normalizeOffset(string $value, string $default): string
+    {
+        return 1 === preg_match('/^[+-](0\d|1[0-4]):[0-5]\d$/', $value) ? $value : $default;
     }
 
     private function reserveSlot(Field $field, ?Lead $lead, \DateTimeImmutable $slot): void

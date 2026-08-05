@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MauticPlugin\WittyBundle\Form\Type;
 
+use MauticPlugin\WittyBundle\Service\PlugNmeet\MeetSlotAvailabilityCalculator;
 use Symfony\Component\Form\AbstractType;
 use Symfony\Component\Form\Extension\Core\Type\ChoiceType;
 use Symfony\Component\Form\Extension\Core\Type\IntegerType;
@@ -36,6 +37,24 @@ class MeetSlotPickerPropertiesType extends AbstractType
             'expanded' => true,
             'required' => true,
             'attr'     => ['tooltip' => 'mautic.witty.meet.slotpicker.days_of_week_tooltip'],
+        ]);
+
+        $builder->add('timezone', ChoiceType::class, [
+            'label'       => 'mautic.witty.meet.slotpicker.timezone',
+            'choices'     => MeetSlotAvailabilityCalculator::utcOffsetChoices(),
+            'required'    => true,
+            // Un <select> HTML soumet toujours une valeur (le premier <option>
+            // si aucune n'est explicitement selectionnee) : sans un placeholder
+            // reellement vide ici, un utilisateur qui ne touche pas ce champ
+            // enregistrerait silencieusement le tout premier decalage de la
+            // liste (UTC-12:00) au lieu du sien. Avec 'required' => true, un
+            // placeholder soumis vide echoue la validation du formulaire et
+            // force un choix explicite plutot que de deviner un defaut.
+            'placeholder' => 'mautic.witty.meet.slotpicker.timezone_placeholder',
+            'attr'        => [
+                'class'   => 'form-control',
+                'tooltip' => 'mautic.witty.meet.slotpicker.timezone_tooltip',
+            ],
         ]);
 
         $builder->add('start_time', TimeType::class, [

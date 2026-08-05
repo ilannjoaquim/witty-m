@@ -20,6 +20,11 @@ class MeetSlotAvailabilityCalculator
     // sans fin si quelqu'un navigue le calendrier tres loin dans le futur.
     public const MAX_ADVANCE_DAYS = 180;
 
+    // Decalage fixe (pas de bascule DST automatique) : coherent avec le
+    // choix "liste deroulante UTC" propose a l'organisateur comme au
+    // visiteur (cf. utcOffsetChoices() ci-dessous et le widget JS du champ).
+    public const DEFAULT_TIMEZONE = '+00:00';
+
     private const DEFAULT_SLOT_DURATION_MINUTES = 30;
 
     private const DEFAULT_BUFFER_DAYS = 1;
@@ -44,7 +49,16 @@ class MeetSlotAvailabilityCalculator
         ?\DateTimeImmutable $now = null,
     ): array {
         $properties = $field->getProperties();
-        $now        = $now ?? new \DateTimeImmutable();
+        $timezone   = new \DateTimeZone($this->normalizeTimezoneOffset((string) ($properties['timezone'] ?? self::DEFAULT_TIMEZONE)));
+
+        // "9h" dans la regle de recurrence signifie 9h dans le fuseau choisi
+        // par l'organisateur a la creation du champ, pas dans le fuseau
+        // ambiant (souvent juste le defaut PHP du serveur) que portent
+        // $rangeStart/$rangeEnd/$now a l'appel : on reancre les trois dans ce
+        // fuseau avant tout calcul de jour/heure.
+        $rangeStart = $this->inTimezone($rangeStart, $timezone);
+        $rangeEnd   = $this->inTimezone($rangeEnd, $timezone);
+        $now        = $this->inTimezone($now ?? new \DateTimeImmutable(), $timezone);
 
         $daysOfWeek = array_map('intval', (array) ($properties['days_of_week'] ?? [1, 2, 3, 4, 5]));
         $startTime  = $this->parseTime((string) ($properties['start_time'] ?? '09:00'));
@@ -135,6 +149,57 @@ class MeetSlotAvailabilityCalculator
         }
 
         return $slots;
+    }
+
+    /**
+     * Liste des decalages UTC proposables, meme cote organisateur (proprietes
+     * du champ, cf. Form/Type/MeetSlotPickerPropertiesType.php et
+     * Service/Tool/Tools/CreateFormTool.php) que cote visiteur (widget JS,
+     * meme granularite reconstruite en JS) : un seul catalogue "source de
+     * verite" pour eviter toute divergence. Pas de fuseaux nommes (IANA) : un
+     * decalage fixe, plus simple et previsible, au prix de ne pas suivre
+     * automatiquement les changements d'heure ete/hiver.
+     *
+     * Granularite 15 min (pas 30) : necessaire pour couvrir les decalages
+     * reels non ronds, ex. Nepal +05:45, Chatham +12:45.
+     *
+     * @return array<string, string> libelle "UTC+01:00" => valeur "+01:00"
+     */
+    public static function utcOffsetChoices(): array
+    {
+        $choices = [];
+
+        for ($minutes = -12 * 60; $minutes <= 14 * 60; $minutes += 15) {
+            $offset = self::formatOffset($minutes);
+            $choices['UTC'.$offset] = $offset;
+        }
+
+        return $choices;
+    }
+
+    private static function formatOffset(int $minutes): string
+    {
+        $sign = $minutes < 0 ? '-' : '+';
+        $abs  = abs($minutes);
+
+        return sprintf('%s%02d:%02d', $sign, intdiv($abs, 60), $abs % 60);
+    }
+
+    private function normalizeTimezoneOffset(string $value): string
+    {
+        return 1 === preg_match('/^[+-](0\d|1[0-4]):[0-5]\d$/', $value) ? $value : self::DEFAULT_TIMEZONE;
+    }
+
+    /**
+     * Reconstruit le meme instant "mur" (annee/mois/jour/heure/minute/seconde
+     * affiches) mais rattache au fuseau donne, sans tenir compte du fuseau
+     * que portait $dt a l'appel : c'est la date/heure telle qu'elle
+     * apparaitrait sur une horloge murale, pas l'instant absolu, qui nous
+     * interesse ici (cf. docblock de computeAvailableSlots()).
+     */
+    private function inTimezone(\DateTimeImmutable $dt, \DateTimeZone $timezone): \DateTimeImmutable
+    {
+        return new \DateTimeImmutable($dt->format('Y-m-d\TH:i:s'), $timezone);
     }
 
     /**

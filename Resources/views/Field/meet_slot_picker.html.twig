@@ -50,6 +50,10 @@
   {% if field.helpMessage is not empty %}<span class="mauticform-helpmessage">{{ field.helpMessage|purify_allow_target_blank }}</span>{% endif %}
 
   <input type="hidden" name="{{ inputName }}" id="{{ inputId }}" value="" {% if inForm is defined and inForm %}disabled="disabled"{% endif %} />
+  {# Champ brut (pas un vrai champ Mautic, jamais expose comme {formfield=...}) :
+     seul MeetSlotValidationSubscriber le lit, pour ecrire le fuseau choisi par
+     le visiteur dans le champ contact meeting_scheduled_visitor_at. #}
+  <input type="hidden" name="mauticform[{{ field.alias }}__visitor_tz]" id="{{ inputId }}__visitor_tz" value="" {% if inForm is defined and inForm %}disabled="disabled"{% endif %} />
 
   {% if inBuilder %}
     <div class="alert alert-info witty-slot-picker-builder-note">{{ 'mautic.witty.meet.slotpicker.builder_placeholder'|trans }}</div>
@@ -63,7 +67,13 @@
          data-label-select-date="{{ 'mautic.witty.meet.slotpicker.select_date'|trans }}"
          data-label-prev="{{ 'mautic.witty.meet.slotpicker.prev_month'|trans }}"
          data-label-next="{{ 'mautic.witty.meet.slotpicker.next_month'|trans }}"
-         data-locale="{{ language|default('en') }}">
+         data-label-your-timezone="{{ 'mautic.witty.meet.slotpicker.your_timezone'|trans }}"
+         data-locale="{{ language|default('en') }}"
+         data-visitor-tz-input-id="{{ inputId }}__visitor_tz">
+      <div class="witty-slot-picker-tz">
+        <label class="witty-slot-picker-tz-label"></label>
+        <select class="witty-slot-picker-tz-select"></select>
+      </div>
       <div class="witty-slot-picker-calendar">
         <div class="witty-slot-picker-cal-header">
           <button type="button" class="witty-slot-picker-nav witty-slot-picker-prev" aria-label="{{ 'mautic.witty.meet.slotpicker.prev_month'|trans }}">&lsaquo;</button>
@@ -103,6 +113,22 @@
     box-sizing: border-box;
   }
   .witty-slot-picker * { box-sizing: border-box; }
+  .witty-slot-picker-tz {
+    flex-basis: 100%;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--witty-muted);
+  }
+  .witty-slot-picker-tz-select {
+    font-size: 12px;
+    padding: 4px 6px;
+    border: 1px solid var(--witty-border);
+    border-radius: var(--witty-radius);
+    color: var(--witty-text);
+    background: var(--witty-bg);
+  }
   .witty-slot-picker-calendar {
     flex: 1 1 260px;
     min-width: 240px;
@@ -222,6 +248,82 @@
   var timesTitleEl  = widget.querySelector('.witty-slot-picker-times-title');
   var timesEl       = widget.querySelector('.witty-slot-picker-times');
   var statusEl      = widget.querySelector('.witty-slot-picker-status');
+  var tzLabelEl     = widget.querySelector('.witty-slot-picker-tz-label');
+  var tzSelectEl    = widget.querySelector('.witty-slot-picker-tz-select');
+
+  // Meme catalogue (pas de granularite au-dela du 1/4 d'heure) que
+  // MeetSlotAvailabilityCalculator::utcOffsetChoices() cote serveur : les
+  // creneaux renvoyes par l'API restent des instants absolus (ISO 8601 avec
+  // le decalage de l'organisateur), ce selecteur ne change QUE l'affichage
+  // cote visiteur, jamais ce qui est envoye au serveur a la soumission.
+  function buildOffsetMinutesList() {
+    var list = [];
+    for (var m = -12 * 60; m <= 14 * 60; m += 15) {
+      list.push(m);
+    }
+    return list;
+  }
+
+  function formatOffset(minutes) {
+    var sign = minutes < 0 ? '-' : '+';
+    var abs  = Math.abs(minutes);
+    var hh   = String(Math.floor(abs / 60)).padStart(2, '0');
+    var mm   = String(abs % 60).padStart(2, '0');
+    return sign + hh + ':' + mm;
+  }
+
+  function detectBrowserOffsetMinutes() {
+    // Date.getTimezoneOffset() est le signe inverse d'un decalage UTC
+    // ("minutes a AJOUTER pour obtenir UTC"), d'ou le -1.
+    var raw = -new Date().getTimezoneOffset();
+    // Alignement sur la granularite 1/4h du catalogue (les decalages reels
+    // sont deja quasi tous des multiples de 15, ce round est defensif).
+    return Math.round(raw / 15) * 15;
+  }
+
+  var offsetMinutesList  = buildOffsetMinutesList();
+  var selectedOffsetMinutes = detectBrowserOffsetMinutes();
+  if (offsetMinutesList.indexOf(selectedOffsetMinutes) === -1) {
+    selectedOffsetMinutes = 0;
+  }
+
+  // Champ brut (pas un vrai champ Mautic) qui transmet le decalage choisi
+  // par le visiteur : seul MeetSlotValidationSubscriber le lit, pour ecrire
+  // le champ contact meeting_scheduled_visitor_at deja forme cote serveur
+  // (cf. docblock de MeetSlotValidationSubscriber::updateContactMeetingFields()).
+  // Rien d'autre a calculer/formater ici : le widget n'envoie que le
+  // decalage brut, jamais un texte deja mis en forme.
+  var visitorTzInput = document.getElementById(widget.getAttribute('data-visitor-tz-input-id'));
+
+  function syncVisitorTzInput() {
+    if (visitorTzInput) {
+      visitorTzInput.value = formatOffset(selectedOffsetMinutes);
+    }
+  }
+
+  function buildTimezoneSelector() {
+    tzLabelEl.textContent = widget.getAttribute('data-label-your-timezone');
+
+    tzSelectEl.innerHTML = offsetMinutesList.map(function (minutes) {
+      return '<option value="' + minutes + '">UTC' + formatOffset(minutes) + '</option>';
+    }).join('');
+    tzSelectEl.value = String(selectedOffsetMinutes);
+    syncVisitorTzInput();
+
+    tzSelectEl.addEventListener('change', function () {
+      selectedOffsetMinutes = parseInt(tzSelectEl.value, 10) || 0;
+      syncVisitorTzInput();
+      rerenderCurrentMonth();
+    });
+  }
+
+  // Composantes "murales" (annee/mois/jour/heure/minute) d'un instant une
+  // fois decale au fuseau choisi, calculees a la main (epoch + decalage puis
+  // lecture des getters UTC) plutot que via Intl : coherent avec le decalage
+  // fixe cote organisateur, pas de dependance a une base de fuseaux nommes.
+  function shiftedDate(date) {
+    return new Date(date.getTime() + selectedOffsetMinutes * 60000);
+  }
 
   var today       = new Date();
   var minMonth    = startOfMonth(today);
@@ -242,8 +344,17 @@
     return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
   }
 
-  function dayKey(date) {
-    return date.getFullYear() + '-' + (date.getMonth() + 1) + '-' + date.getDate();
+  // Cle de jour construite a partir d'entiers annee/mois(0-based)/jour, jamais
+  // d'un Date directement : les cellules de la grille (annee/mois/jour de
+  // calendrier, independants du fuseau) et les creneaux recus du serveur
+  // (regroupes par jour APRES decalage au fuseau choisi, cf. shiftedDate) se
+  // rejoignent sur ce meme format, generes par deux chemins differents.
+  function dayKey(year, month, day) {
+    return year + '-' + (month + 1) + '-' + day;
+  }
+
+  function dayKeyOfShifted(shifted) {
+    return dayKey(shifted.getUTCFullYear(), shifted.getUTCMonth(), shifted.getUTCDate());
   }
 
   function setStatus(text) {
@@ -279,7 +390,22 @@
     }
   }
 
-  function renderGrid(monthData) {
+  // Regroupe les creneaux bruts (recus une seule fois du serveur, jamais
+  // re-fetches) par jour APRES decalage au fuseau actuellement choisi :
+  // appele a chaque rendu (chargement de mois ET changement de fuseau), pas
+  // seulement au chargement, puisque le meme instant absolu peut tomber sur
+  // un jour different selon le fuseau d'affichage (proche de minuit).
+  function computeByDay(rawSlots) {
+    var byDay = {};
+    rawSlots.forEach(function (item) {
+      var shifted = shiftedDate(item.date);
+      var dKey = dayKeyOfShifted(shifted);
+      (byDay[dKey] = byDay[dKey] || []).push({ iso: item.iso, shifted: shifted });
+    });
+    return byDay;
+  }
+
+  function renderGrid(byDay) {
     gridEl.innerHTML = '';
     var year   = currentMonth.getFullYear();
     var month  = currentMonth.getMonth();
@@ -298,8 +424,8 @@
     for (var day = 1; day <= daysInMonth; day++) {
       (function (day) {
         var date = new Date(year, month, day);
-        var key  = dayKey(date);
-        var hasSlots = !!(monthData.byDay[key] && monthData.byDay[key].length);
+        var key  = dayKey(year, month, day);
+        var hasSlots = !!(byDay[key] && byDay[key].length);
 
         var btn = document.createElement('button');
         btn.type = 'button';
@@ -310,7 +436,7 @@
           btn.disabled = true;
         } else {
           btn.addEventListener('click', function () {
-            selectDay(key, date, monthData);
+            selectDay(key, date, byDay);
           });
         }
 
@@ -323,21 +449,24 @@
     }
   }
 
-  function selectDay(key, date, monthData) {
+  function selectDay(key, date, byDay) {
     selectedDayKey = key;
-    renderGrid(monthData);
-    renderTimes(key, date, monthData);
+    renderGrid(byDay);
+    renderTimes(key, date, byDay);
   }
 
-  function renderTimes(key, date, monthData) {
+  function renderTimes(key, date, byDay) {
     timesTitleEl.textContent = date.toLocaleDateString(locale, { weekday: 'long', day: 'numeric', month: 'long' });
     timesEl.innerHTML = '';
 
-    (monthData.byDay[key] || []).forEach(function (slot) {
+    (byDay[key] || []).forEach(function (slot) {
       var btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'witty-slot-picker-time';
-      btn.textContent = slot.date.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' });
+      // timeZone: 'UTC' : slot.shifted porte deja le fuseau choisi (epoch +
+      // decalage, cf. shiftedDate) dans ses champs UTC. Sans ce forcage,
+      // toLocaleTimeString reappliquerait EN PLUS le fuseau du navigateur.
+      btn.textContent = slot.shifted.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' });
       btn.addEventListener('click', function () {
         Array.prototype.forEach.call(timesEl.children, function (el) {
           el.classList.remove('is-selected');
@@ -353,10 +482,11 @@
     });
   }
 
-  function afterLoad(monthData) {
-    renderGrid(monthData);
+  function afterLoad(rawSlots) {
+    var byDay = computeByDay(rawSlots);
+    renderGrid(byDay);
 
-    var hasAnyDay = Object.keys(monthData.byDay).length > 0;
+    var hasAnyDay = Object.keys(byDay).length > 0;
 
     if (!hasAnyDay) {
       timesTitleEl.textContent = '';
@@ -367,9 +497,24 @@
 
     setStatus('');
 
-    if (!selectedDayKey || !monthData.byDay[selectedDayKey]) {
+    if (!selectedDayKey || !byDay[selectedDayKey]) {
       timesTitleEl.textContent = widget.getAttribute('data-label-select-date');
       timesEl.innerHTML = '';
+    } else {
+      // Le jour selectionne reste visible (ex. apres un changement de
+      // fuseau) : reaffiche ses creneaux avec les nouveaux libelles d'heure.
+      var selectedDate = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), parseInt(selectedDayKey.split('-')[2], 10));
+      renderTimes(selectedDayKey, selectedDate, byDay);
+    }
+  }
+
+  // Re-rendu pur (aucun appel reseau) apres un changement de fuseau choisi :
+  // les creneaux bruts du mois affiche sont deja en cache, seul leur
+  // regroupement par jour et leurs libelles d'heure dependent du fuseau.
+  function rerenderCurrentMonth() {
+    var key = monthParam(currentMonth);
+    if (monthCache[key]) {
+      afterLoad(monthCache[key]);
     }
   }
 
@@ -392,15 +537,11 @@
         return response.json();
       })
       .then(function (data) {
-        var byDay = {};
-        (data.slots || []).forEach(function (iso) {
-          var date = new Date(iso);
-          var dKey = dayKey(date);
-          (byDay[dKey] = byDay[dKey] || []).push({ iso: iso, date: date });
+        var rawSlots = (data.slots || []).map(function (iso) {
+          return { iso: iso, date: new Date(iso) };
         });
-        var monthData = { byDay: byDay };
-        monthCache[key] = monthData;
-        afterLoad(monthData);
+        monthCache[key] = rawSlots;
+        afterLoad(rawSlots);
       })
       .catch(function () {
         setStatus(widget.getAttribute('data-label-error'));
@@ -423,6 +564,7 @@
     loadMonth(currentMonth);
   });
 
+  buildTimezoneSelector();
   renderWeekdays();
   renderHeader();
   loadMonth(currentMonth);

@@ -9,16 +9,17 @@ use Doctrine\Common\Collections\Collection;
 use Doctrine\ORM\EntityManagerInterface;
 use Mautic\CategoryBundle\Entity\Category;
 use Mautic\CategoryBundle\Entity\CategoryRepository;
+use Mautic\LeadBundle\Entity\Tag;
 use Mautic\ProjectBundle\Entity\Project;
 
 /**
- * Categorie et projets suivent exactement le meme modele que
- * segments/emails/formulaires cote Mautic core (cf.
+ * Categorie, projets et tags suivent exactement le meme modele que
+ * segments/emails/formulaires/contacts cote Mautic core (cf.
  * Mautic\LeadBundle\Entity\LeadList) : on reutilise directement les entites
- * CategoryBundle/ProjectBundle plutot que de reinventer un systeme de tags
- * propre a Witty, pour que Skills/Rooms s'integrent aux mecanismes de
- * classification existants (filtrage par categorie/projet ailleurs dans
- * Mautic, etc.).
+ * CategoryBundle/ProjectBundle/Tag (meme pool que les contacts) plutot que de
+ * reinventer un systeme de classification propre a Witty, pour que
+ * Skills/Rooms s'integrent aux mecanismes existants (filtrage par
+ * categorie/projet/tag ailleurs dans Mautic, etc.).
  */
 class TaxonomyOptionsProvider
 {
@@ -50,6 +51,39 @@ class TaxonomyOptionsProvider
             static fn (Project $project): array => ['id' => (int) $project->getId(), 'name' => (string) $project->getName()],
             $projects,
         );
+    }
+
+    /**
+     * @return array<int, array{id: int, name: string}>
+     */
+    public function tagChoices(): array
+    {
+        $tags = $this->entityManager->getRepository(Tag::class)->findBy([], ['tag' => 'ASC']);
+
+        return array_map(
+            static fn (Tag $tag): array => ['id' => (int) $tag->getId(), 'name' => (string) $tag->getTag()],
+            $tags,
+        );
+    }
+
+    /**
+     * Cree-a-la-volee des nouveaux tags : gere cote client par
+     * Mautic.createLeadTag (widget Chosen, cf. gabarits Skill/Rooms), qui
+     * appelle l'action ajax core "lead:addLeadTags" avant meme la soumission
+     * de notre formulaire. A ce stade, $ids ne contient donc que des ids
+     * numeriques de tags deja existants.
+     *
+     * @param int[] $ids
+     */
+    public function resolveTags(array $ids): Collection
+    {
+        $ids = array_values(array_unique(array_filter(array_map('intval', $ids), static fn (int $id): bool => $id > 0)));
+
+        if ([] === $ids) {
+            return new ArrayCollection();
+        }
+
+        return new ArrayCollection($this->entityManager->getRepository(Tag::class)->findBy(['id' => $ids]));
     }
 
     public function resolveCategory(?int $id): ?Category

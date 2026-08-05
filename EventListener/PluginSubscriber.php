@@ -38,6 +38,17 @@ class PluginSubscriber implements EventSubscriberInterface
     private const MEETING_LINK_FIELD_ALIAS = 'meeting_invitation_link';
     private const MEETING_DATE_FIELD_ALIAS = 'meeting_scheduled_at';
 
+    /**
+     * meeting_scheduled_at reste une vraie date (organisateur, fuseau
+     * configure sur le champ) : utilisable dans un filtre de segment ou une
+     * campagne ("3 jours avant le RDV"). Ces deux-la sont du texte lisible,
+     * deja formate avec le decalage explicite en toutes lettres, ecrits par
+     * MeetSlotValidationSubscriber a la reservation (cf. cette classe) :
+     * aucun calcul de fuseau a refaire cote destinataire de l'email.
+     */
+    public const MEETING_ORGANIZER_TIME_FIELD_ALIAS = 'meeting_scheduled_organizer_at';
+    public const MEETING_VISITOR_TIME_FIELD_ALIAS   = 'meeting_scheduled_visitor_at';
+
     public function __construct(
         private ThemeInstaller $themeInstaller,
         private FieldModel $fieldModel,
@@ -97,6 +108,8 @@ class PluginSubscriber implements EventSubscriberInterface
         $this->provisionField(self::WEBINAR_LINK_FIELD_ALIAS, 'Webinar invitation link', 'text');
         $this->provisionField(self::MEETING_LINK_FIELD_ALIAS, 'Meeting invitation link', 'text');
         $this->provisionField(self::MEETING_DATE_FIELD_ALIAS, 'Meeting scheduled at', 'datetime');
+        $this->provisionField(self::MEETING_ORGANIZER_TIME_FIELD_ALIAS, 'Meeting scheduled Organizer at', 'text');
+        $this->provisionField(self::MEETING_VISITOR_TIME_FIELD_ALIAS, 'Meeting scheduled Visitor at', 'text');
         $this->migrateOldMeetLinkField();
     }
 

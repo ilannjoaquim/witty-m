@@ -81,6 +81,10 @@ class VideoconferenceController extends CommonController
                     static fn ($project): string => (string) $project->getName(),
                     $local->getProjects()->toArray(),
                 )) : [],
+                'tags'              => $local ? array_values(array_map(
+                    static fn ($tag): string => (string) $tag->getTag(),
+                    $local->getTags()->toArray(),
+                )) : [],
                 'createdBy'         => $local?->getCreatedBy()?->getName(),
                 'totalParticipants' => $rooms->totalParticipants($roomId, (int) ($info['joined_participants'] ?? 0)),
             ];
@@ -94,6 +98,7 @@ class VideoconferenceController extends CommonController
             'options' => [
                 'categories' => $taxonomy->categoryChoices('witty_room'),
                 'projects'   => $taxonomy->projectChoices(),
+                'tags'       => $taxonomy->tagChoices(),
             ],
         ]);
     }
@@ -104,6 +109,7 @@ class VideoconferenceController extends CommonController
         $title      = trim((string) $request->request->get('title', ''));
         $categoryId = (int) $request->request->get('category_id', 0);
         $projectIds = (array) $request->request->all('project_ids');
+        $tagIds     = (array) $request->request->all('tag_ids');
 
         if ('' === $roomId) {
             return new JsonResponse(['status' => false, 'msg' => 'room_id est obligatoire.'], Response::HTTP_BAD_REQUEST);
@@ -129,6 +135,7 @@ class VideoconferenceController extends CommonController
         $room->setTitle($title);
         $room->setCategory($taxonomy->resolveCategory($categoryId > 0 ? $categoryId : null));
         $room->setProjects($taxonomy->resolveProjects($projectIds));
+        $room->setTags($taxonomy->resolveTags($tagIds));
         $rooms->save($room);
 
         return new JsonResponse(['status' => true] + $result);

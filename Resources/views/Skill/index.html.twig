@@ -82,7 +82,7 @@
     var filterInput = document.getElementById('witty-skill-filter');
     var allSkills   = [];
     var filterTerm  = '';
-    var options     = { categories: [], projects: [] };
+    var options     = { categories: [], projects: [], tags: [] };
 
     function headersForm() {
         return { 'X-Requested-With': 'XMLHttpRequest', 'X-CSRF-Token': window.mauticAjaxCsrf || '' };
@@ -135,7 +135,7 @@
             .then(function (data) {
                 if (!data.status) { renderError(data.msg); return; }
                 allSkills = data.skills || [];
-                options   = data.options || { categories: [], projects: [] };
+                options   = data.options || { categories: [], projects: [], tags: [] };
                 renderSkills();
             })
             .catch(function (err) { renderError(err.message); });
@@ -218,9 +218,10 @@
     }
 
     function openForm(skill) {
-        skill = skill || { id: '', name: '', description: '', content: '', category: null, projects: [] };
+        skill = skill || { id: '', name: '', description: '', content: '', category: null, projects: [], tags: [] };
 
         var selectedProjectIds = (skill.projects || []).map(function (p) { return String(p.id); });
+        var selectedTagIds = (skill.tags || []).map(function (t) { return String(t.id); });
         var categoryModalHeader = '{{ 'mautic.category.header.new'|trans|e('js') }}';
 
         var categoryOptions = '<option value="">{{ 'mautic.core.form.uncategorized'|trans|e('js') }}</option>' +
@@ -231,6 +232,10 @@
 
         var projectOptions = options.projects.map(function (p) {
             return '<option value="' + p.id + '"' + (selectedProjectIds.indexOf(String(p.id)) !== -1 ? ' selected' : '') + '>' + escapeHtml(p.name) + '</option>';
+        }).join('');
+
+        var tagOptions = options.tags.map(function (t) {
+            return '<option value="' + t.id + '"' + (selectedTagIds.indexOf(String(t.id)) !== -1 ? ' selected' : '') + '>' + escapeHtml(t.name) + '</option>';
         }).join('');
 
         openModal(
@@ -259,6 +264,16 @@
                             '</select>' +
                         '</div>' +
                     '</div>' +
+                    '<div class="form-group"><label for="witty-skill-tags">{{ 'mautic.lead.tags'|trans|e('js') }}</label>' +
+                        '<div class="choice-wrapper">' +
+                            '<select id="witty-skill-tags" name="tags[]" autocomplete="off" multiple="multiple"' +
+                                ' data-placeholder="{{ 'mautic.lead.tags.select_or_create'|trans|e('js') }}"' +
+                                ' data-no-results-text="{{ 'mautic.lead.tags.enter_to_create'|trans|e('js') }}"' +
+                                ' data-allow-add="true">' +
+                                tagOptions +
+                            '</select>' +
+                        '</div>' +
+                    '</div>' +
                 '</div>' +
                 '<div class="form-group">' +
                     '<label>{{ 'mautic.witty.skill.content'|trans|e('js') }}</label>' +
@@ -281,9 +296,16 @@
         categorySelect.addEventListener('change', function () {
             Mautic.loadAjaxModalBySelectValue(categorySelect, 'new', app.dataset.categoryNewUrl, categoryModalHeader);
         });
+
+        var tagsSelect = document.getElementById('witty-skill-tags');
+        tagsSelect.addEventListener('change', function () {
+            if (window.Mautic && typeof Mautic.createLeadTag === 'function') { Mautic.createLeadTag(tagsSelect); }
+        });
+
         if (window.Mautic && typeof Mautic.activateChosenSelect === 'function') {
             Mautic.activateChosenSelect(categorySelect);
             Mautic.activateChosenSelect(document.getElementById('witty-skill-projects'));
+            Mautic.activateChosenSelect(tagsSelect);
         }
 
         document.getElementById('witty-skill-import').addEventListener('change', function (event) {
@@ -311,6 +333,10 @@
                 document.getElementById('witty-skill-projects').selectedOptions,
                 function (opt) { return opt.value; }
             );
+            var tagIds = Array.prototype.map.call(
+                document.getElementById('witty-skill-tags').selectedOptions,
+                function (opt) { return opt.value; }
+            );
 
             if (!name) { window.alert('{{ 'mautic.witty.skill.name'|trans|e('js') }}'); return; }
             if (!content.trim()) { window.alert('{{ 'mautic.witty.skill.content'|trans|e('js') }}'); return; }
@@ -318,7 +344,7 @@
             fetch(app.dataset.saveEndpoint, {
                 method: 'POST',
                 headers: headersForm(),
-                body: toForm({ id: skill.id || '', name: name, description: description, content: content, category_id: categoryId, project_ids: projectIds })
+                body: toForm({ id: skill.id || '', name: name, description: description, content: content, category_id: categoryId, project_ids: projectIds, tag_ids: tagIds })
             })
                 .then(function (r) { return r.json(); })
                 .then(function (data) {

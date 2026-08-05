@@ -17,7 +17,7 @@ return [
     // Le changement de version declenche Engine::up() sur Migrations/ au prochain
     // mautic:plugins:reload : c'est ce qui cree les tables sur une instance ou le
     // plugin etait deja installe.
-    'version'     => '2.4.0',
+    'version'     => '2.5.1',
     'author'      => 'Witty',
 
     'routes' => [
@@ -188,9 +188,11 @@ return [
             // Parent sans route : un item avec des enfants devient un simple
             // bouton d'ouverture/fermeture du sous-menu (cf. Menu/main.html.twig
             // de Mautic), la route eventuelle ne servirait a rien.
+            // Priorite tres au-dessus du Dashboard (100, cf. DashboardBundle\Config\config.php)
+            // pour rester tout en haut du menu : c'est la section qu'on veut prioriser.
             'mautic.witty.menu.root' => [
                 'iconClass' => 'ri-robot-2-line', // si l'icone ne s'affiche pas : 'fa fa-magic'
-                'priority'  => 30,
+                'priority'  => 1000,
             ],
             'mautic.witty.menu.chat' => [
                 'route'     => 'witty_chat',
@@ -202,9 +204,11 @@ return [
                 'parent'    => 'mautic.witty.menu.root',
                 'priority'  => 20,
             ],
+            // Entre Channels (40, cf. CoreBundle\Config\config.php) et Points (30,
+            // cf. PointBundle\Config\config.php).
             'mautic.witty.menu.videoconference' => [
                 'iconClass' => 'ri-vidicon-line',
-                'priority'  => 25,
+                'priority'  => 35,
             ],
             'mautic.witty.menu.videoconference.rooms' => [
                 'route'     => 'witty_video_rooms',
