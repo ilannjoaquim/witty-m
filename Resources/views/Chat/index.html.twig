@@ -43,7 +43,20 @@
     #witty-log { flex: 1; overflow-y: auto; padding: 16px; background: #fff; border: 1px solid #e0e0e0; border-radius: 4px; }
     .witty-msg { max-width: 78%; margin-bottom: 14px; padding: 10px 14px; border-radius: 10px; line-height: 1.5; white-space: pre-wrap; word-wrap: break-word; }
     .witty-msg.user { margin-left: auto; background: var(--button-secondary, #393939); color: var(--button-secondary-text, #fff); }
-    .witty-msg.assistant { background: var(--background-hover, #f2f4f8); color: var(--text-primary, #2b2b2b); }
+    .witty-msg.assistant { background: var(--background-hover, #f2f4f8); color: var(--text-primary, #2b2b2b); white-space: normal; overflow-x: auto; }
+    .witty-msg.assistant > *:first-child { margin-top: 0; }
+    .witty-msg.assistant > *:last-child { margin-bottom: 0; }
+    .witty-msg.assistant p { margin: 0 0 10px; }
+    .witty-msg.assistant h1, .witty-msg.assistant h2, .witty-msg.assistant h3,
+    .witty-msg.assistant h4, .witty-msg.assistant h5, .witty-msg.assistant h6 { margin: 14px 0 8px; line-height: 1.3; }
+    .witty-msg.assistant hr { border: none; border-top: 1px solid #dfe3ea; margin: 12px 0; }
+    .witty-msg.assistant ul, .witty-msg.assistant ol { margin: 0 0 10px; padding-left: 22px; }
+    .witty-msg.assistant code { background: rgba(0,0,0,.06); border-radius: 3px; padding: 1px 4px; font-size: .9em; }
+    .witty-msg.assistant pre { background: rgba(0,0,0,.06); border-radius: 6px; padding: 10px; overflow-x: auto; margin: 0 0 10px; }
+    .witty-msg.assistant pre code { background: none; padding: 0; }
+    .witty-msg.assistant table { border-collapse: collapse; width: 100%; margin: 0 0 10px; font-size: .95em; }
+    .witty-msg.assistant th, .witty-msg.assistant td { border: 1px solid #dfe3ea; padding: 4px 8px; text-align: left; }
+    .witty-msg.assistant a { color: inherit; text-decoration: underline; }
     .witty-msg.error { background: #fdecea; color: #a5261c; border: 1px solid #f5c6c2; }
     .witty-trace { margin: 6px 0 14px; font-size: 12px; color: #6b7280; }
     .witty-chip { display: inline-block; margin: 2px 4px 2px 0; padding: 2px 8px; border-radius: 10px; background: #eef1f6; border: 1px solid #dfe3ea; }
@@ -269,10 +282,139 @@
         };
     }
 
+    // Rendu markdown -> HTML minimal, sans dependance externe. Le texte brut
+    // est echappe AVANT toute transformation : ce qu'on injecte ensuite comme
+    // balises vient de nous, jamais du modele, donc pas de risque XSS meme
+    // si le texte du LLM contient du HTML (ex. reflet d'un contenu tiers via
+    // un outil, injection de prompt...).
+    function mdEscapeHtml(value) {
+        var div = document.createElement('div');
+        div.textContent = value == null ? '' : String(value);
+        return div.innerHTML;
+    }
+
+    function mdInline(text) {
+        text = text.replace(/`([^`]+)`/g, function (m, code) { return '<code>' + code + '</code>'; });
+        text = text.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, function (m, label, url) {
+            return '<a href="' + url + '" target="_blank" rel="noopener noreferrer">' + label + '</a>';
+        });
+        text = text.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+        text = text.replace(/__([^_]+)__/g, '<strong>$1</strong>');
+        text = text.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+        return text;
+    }
+
+    function renderMarkdown(raw) {
+        var lines = mdEscapeHtml(raw).split('\n');
+        var html = '';
+        var paragraph = [];
+        var i = 0;
+
+        function flushParagraph() {
+            if (paragraph.length) {
+                html += '<p>' + mdInline(paragraph.join('<br>')) + '</p>';
+                paragraph = [];
+            }
+        }
+
+        while (i < lines.length) {
+            var line = lines[i];
+
+            if (/^```/.test(line)) {
+                flushParagraph();
+                var code = [];
+                i++;
+                while (i < lines.length && !/^```/.test(lines[i])) { code.push(lines[i]); i++; }
+                html += '<pre><code>' + code.join('\n') + '</code></pre>';
+                i++;
+                continue;
+            }
+
+            if (/^\s*([-*_])\s*(\1\s*){2,}$/.test(line)) {
+                flushParagraph();
+                html += '<hr>';
+                i++;
+                continue;
+            }
+
+            var headerMatch = line.match(/^(#{1,6})\s+(.*)$/);
+            if (headerMatch) {
+                flushParagraph();
+                var level = headerMatch[1].length;
+                html += '<h' + level + '>' + mdInline(headerMatch[2]) + '</h' + level + '>';
+                i++;
+                continue;
+            }
+
+            if (/^\s*\|(.+)\|\s*$/.test(line) && lines[i + 1] && /^\s*\|[\s:|-]+\|\s*$/.test(lines[i + 1])) {
+                flushParagraph();
+                var splitRow = function (row) {
+                    return row.trim().replace(/^\||\|$/g, '').split('|').map(function (c) { return c.trim(); });
+                };
+                html += '<table><thead><tr>' + splitRow(line).map(function (c) { return '<th>' + mdInline(c) + '</th>'; }).join('') + '</tr></thead><tbody>';
+                i += 2;
+                while (i < lines.length && /^\s*\|(.+)\|\s*$/.test(lines[i])) {
+                    html += '<tr>' + splitRow(lines[i]).map(function (c) { return '<td>' + mdInline(c) + '</td>'; }).join('') + '</tr>';
+                    i++;
+                }
+                html += '</tbody></table>';
+                continue;
+            }
+
+            if (/^\s*[-*]\s+/.test(line)) {
+                flushParagraph();
+                html += '<ul>';
+                while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])) {
+                    html += '<li>' + mdInline(lines[i].replace(/^\s*[-*]\s+/, '')) + '</li>';
+                    i++;
+                }
+                html += '</ul>';
+                continue;
+            }
+
+            if (/^\s*\d+\.\s+/.test(line)) {
+                flushParagraph();
+                html += '<ol>';
+                while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) {
+                    html += '<li>' + mdInline(lines[i].replace(/^\s*\d+\.\s+/, '')) + '</li>';
+                    i++;
+                }
+                html += '</ol>';
+                continue;
+            }
+
+            if (/^\s*$/.test(line)) {
+                flushParagraph();
+                i++;
+                continue;
+            }
+
+            paragraph.push(line);
+            i++;
+        }
+
+        flushParagraph();
+        return html;
+    }
+
+    // L'assistant peut contenir du markdown ; l'utilisateur et les erreurs
+    // restent en texte brut (pas de raison d'interpreter la saisie de
+    // l'utilisateur comme du markup, et ca evite un aller-retour escape/parse
+    // inutile). `dataset.raw` garde la source pour les mises a jour
+    // incrementales du streaming (cf. consumeStream).
+    function renderBubbleText(el, text) {
+        el.dataset.raw = text;
+        if (el.classList.contains('assistant')) {
+            el.innerHTML = renderMarkdown(text);
+        } else {
+            el.textContent = text;
+        }
+    }
+
     function bubble(text, kind) {
         var el = document.createElement('div');
         el.className = 'witty-msg ' + kind;
-        el.textContent = text;
+        renderBubbleText(el, text);
         log.appendChild(el);
         log.scrollTop = log.scrollHeight;
         return el;
@@ -555,7 +697,7 @@
                     bubble(result.data.error || 'Erreur inconnue.', 'error');
                     return;
                 }
-                pending.textContent = result.data.reply;
+                renderBubbleText(pending, result.data.reply);
                 if (result.data.trace && result.data.trace.length) {
                     var wrap = traceContainer();
                     result.data.trace.forEach(function (entry) { wrap.appendChild(chip(entry)); });
@@ -579,7 +721,7 @@
 
             return consumeStream(response, function (event, data) {
                 if (event === 'delta') {
-                    pending.textContent += data.text;
+                    renderBubbleText(pending, (pending.dataset.raw || '') + data.text);
                     log.scrollTop = log.scrollHeight;
                 } else if (event === 'tool') {
                     trace = trace || traceContainer();
@@ -594,18 +736,18 @@
                     setUsage(data);
                 } else if (event === 'done') {
                     pending.classList.remove('witty-cursor');
-                    if (data.reply && !pending.textContent) { pending.textContent = data.reply; }
+                    if (data.reply && !pending.dataset.raw) { renderBubbleText(pending, data.reply); }
                     refreshConversations(data.conversation_id);
                 } else if (event === 'error') {
                     pending.classList.remove('witty-cursor');
-                    if (!pending.textContent) { pending.remove(); }
+                    if (!pending.dataset.raw) { pending.remove(); }
                     bubble(data.error || 'Erreur inconnue.', 'error');
                     if (data.conversation_id) { refreshConversations(data.conversation_id); }
                 }
             });
         }).catch(function (error) {
             pending.classList.remove('witty-cursor');
-            if (!pending.textContent) { pending.remove(); }
+            if (!pending.dataset.raw) { pending.remove(); }
             bubble('Erreur : ' + error.message, 'error');
         }).finally(finish);
     }
