@@ -4,7 +4,10 @@ declare(strict_types=1);
 
 namespace MauticPlugin\WittyBundle\Service\Agent;
 
+use MauticPlugin\WittyBundle\Entity\WittyAttachment;
 use MauticPlugin\WittyBundle\Entity\WittyConversation;
+use MauticPlugin\WittyBundle\Service\Attachment\AttachmentManager;
+use MauticPlugin\WittyBundle\Service\Attachment\Exception\AttachmentNotFoundException;
 use MauticPlugin\WittyBundle\Service\Conversation\ConversationManager;
 use MauticPlugin\WittyBundle\Service\Llm\Dto\LlmResult;
 use MauticPlugin\WittyBundle\Service\Llm\Dto\Message;
@@ -38,6 +41,7 @@ class AgentRunner
         private PromptBuilder $promptBuilder,
         private WittyConfig $config,
         private ConversationManager $conversations,
+        private AttachmentManager $attachments,
         private UsageGuard $usageGuard,
         private LoggerInterface $logger,
     ) {
@@ -45,6 +49,9 @@ class AgentRunner
 
     /**
      * @param callable(string, array<string, mixed>): void|null $emit
+     * @param int[]                                             $attachmentIds Pieces jointes selectionnees
+     *                                                                          par l'utilisateur pour ce tour
+     *                                                                          (voir WittyController::uploadAction()).
      *
      * @return array{reply: string, trace: array<int, array<string, mixed>>, usage: array<string, int>}
      *
@@ -56,6 +63,7 @@ class AgentRunner
         ?callable $emit = null,
         ?string $providerKey = null,
         ?string $modelOverride = null,
+        array $attachmentIds = [],
     ): array {
         if (!$this->config->isConfigured()) {
             throw new LlmException('Aucune cle API configuree. Renseigne-la dans Parametres > Plugins > Witty.');
@@ -70,7 +78,11 @@ class AgentRunner
 
         $this->usageGuard->assertWithinQuota();
 
-        $this->conversations->append($conversation, Message::user($userMessage));
+        $userMsg = $this->conversations->append($conversation, Message::user($userMessage));
+
+        foreach ($this->resolveAttachments($attachmentIds) as $attachment) {
+            $this->attachments->attachToConversation($attachment, $conversation, $userMsg);
+        }
 
         $provider     = $this->providerFactory->get($providerKey ?? $this->config->getDefaultProvider());
         $definitions  = $this->toolRegistry->getDefinitions();
@@ -169,6 +181,30 @@ class AgentRunner
             $apiKey,
             static fn (string $chunk) => $emit(self::EVENT_DELTA, ['text' => $chunk]),
         );
+    }
+
+    /**
+     * Un identifiant invalide ou appartenant a un autre utilisateur est
+     * ignore plutot que de faire echouer tout le tour : le pire cas est un
+     * fichier qu'on n'a pas pu joindre, pas une conversation bloquee.
+     *
+     * @param int[] $attachmentIds
+     *
+     * @return WittyAttachment[]
+     */
+    private function resolveAttachments(array $attachmentIds): array
+    {
+        $resolved = [];
+
+        foreach ($attachmentIds as $id) {
+            try {
+                $resolved[] = $this->attachments->resolve((int) $id);
+            } catch (AttachmentNotFoundException $e) {
+                $this->logger->warning('Witty attachment introuvable, ignore', ['id' => $id, 'exception' => $e]);
+            }
+        }
+
+        return $resolved;
     }
 
     /**

@@ -64,6 +64,18 @@
     .witty-chip.error, .witty-chip.denied { background: #fdecea; border-color: #f5c6c2; color: #a5261c; }
     #witty-form { display: flex; gap: 8px; margin-top: 12px; }
     #witty-input { flex: 1; resize: none; }
+    .witty-attach-btn { display: inline-flex; align-items: center; justify-content: center; width: 36px; flex: 0 0 36px; border: 1px solid #dfe3ea; border-radius: 4px; background: #fff; cursor: pointer; }
+    .witty-attach-btn:hover { background: #f6f8fb; }
+    #witty-pending-attachments { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+    #witty-pending-attachments:empty { display: none; }
+    .witty-attach-chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px; border-radius: 10px; background: #eef1f6; border: 1px solid #dfe3ea; font-size: 12px; }
+    .witty-attach-chip.uploading { background: #fff8e1; border-color: #f3e2a9; }
+    .witty-attach-chip.error { background: #fdecea; border-color: #f5c6c2; color: #a5261c; }
+    .witty-attach-remove { cursor: pointer; opacity: .6; }
+    .witty-attach-remove:hover { opacity: 1; }
+    .witty-msg-attachments { margin: -8px 0 14px; font-size: 12px; }
+    .witty-msg-attachments a, .witty-msg-attachments span { display: inline-flex; align-items: center; gap: 4px; margin-right: 10px; color: #6b7280; }
+    .witty-msg-attachments a { color: inherit; text-decoration: underline; }
     #witty-meta { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 12px; color: #6b7280; margin-bottom: 6px; flex-wrap: wrap; }
     #witty-model-select { display: flex; align-items: center; gap: 6px; }
     #witty-model-select select.form-control { width: auto; height: auto; padding: 4px 8px; font-size: 12px; }
@@ -75,6 +87,7 @@
 <div id="witty-app"
      data-stream-endpoint="{{ path('witty_chat_stream') }}"
      data-send-endpoint="{{ path('witty_chat_send') }}"
+     data-upload-endpoint="{{ path('witty_chat_upload') }}"
      data-list-endpoint="{{ path('witty_conversations') }}"
      data-conversation-endpoint="{{ path('witty_conversation', {'id': 0}) }}"
      data-delete-endpoint="{{ path('witty_conversation_delete', {'id': 0}) }}"
@@ -132,7 +145,12 @@
 
         <div id="witty-log"></div>
 
+        <div id="witty-pending-attachments"></div>
         <div id="witty-form">
+            <input type="file" id="witty-file-input" multiple hidden {{ isConfigured ? '' : 'disabled' }}>
+            <button type="button" id="witty-attach" class="witty-attach-btn" title="{{ 'mautic.witty.chat.attach'|trans }}" {{ isConfigured ? '' : 'disabled' }}>
+                <i class="ri-attachment-2" aria-hidden="true"></i>
+            </button>
             <textarea id="witty-input" class="form-control" rows="2"
                       placeholder="{{ 'mautic.witty.chat.placeholder'|trans }}"
                       {{ isConfigured ? '' : 'disabled' }}></textarea>
@@ -157,6 +175,15 @@
     var providerSelect = document.getElementById('witty-provider');
     var modelSelect     = document.getElementById('witty-model');
     var streaming      = app.dataset.streaming === '1';
+    var fileInput       = document.getElementById('witty-file-input');
+    var attachBtn       = document.getElementById('witty-attach');
+    var pendingWrap     = document.getElementById('witty-pending-attachments');
+
+    // Pieces jointes selectionnees pour le prochain message, chacune uploadee
+    // des la selection (pas au moment d'Envoyer) : le fichier doit deja avoir
+    // un id cote serveur pour pouvoir l'inclure dans attachment_ids.
+    // {filename, status: 'uploading'|'ok'|'error', id, kind}
+    var pendingAttachments = [];
 
     // Fournisseurs pour lesquels une cle API est renseignee, envoyes par le
     // serveur ; vide si aucune n'est configuree (formulaire alors masque).
@@ -435,6 +462,95 @@
         return wrap;
     }
 
+    // Chips des pieces jointes deja envoyees, affiches sous la bulle
+    // utilisateur concernee (message en cours comme historique rouvert).
+    function attachmentsRow(attachments) {
+        var wrap = document.createElement('div');
+        wrap.className = 'witty-msg-attachments';
+        attachments.forEach(function (att) {
+            var el = att.asset_url ? document.createElement('a') : document.createElement('span');
+            if (att.asset_url) {
+                el.href = att.asset_url;
+                el.target = '_blank';
+                el.rel = 'noopener noreferrer';
+            }
+            el.textContent = '📎 ' + att.filename;
+            wrap.appendChild(el);
+        });
+        log.appendChild(wrap);
+        log.scrollTop = log.scrollHeight;
+        return wrap;
+    }
+
+    // Chips des pieces jointes pas encore envoyees, au-dessus du champ de
+    // saisie : uploading -> ok (bouton retirer) ou error (message inline).
+    function renderPendingAttachments() {
+        pendingWrap.innerHTML = '';
+        pendingAttachments.forEach(function (att) {
+            var el = document.createElement('span');
+            el.className = 'witty-attach-chip' + (att.status === 'error' ? ' error' : (att.status === 'uploading' ? ' uploading' : ''));
+            el.appendChild(document.createTextNode(att.filename));
+
+            if ('uploading' !== att.status) {
+                var remove = document.createElement('span');
+                remove.className = 'witty-attach-remove';
+                remove.textContent = '×';
+                remove.addEventListener('click', function () {
+                    pendingAttachments = pendingAttachments.filter(function (a) { return a !== att; });
+                    renderPendingAttachments();
+                });
+                el.appendChild(remove);
+            }
+
+            pendingWrap.appendChild(el);
+        });
+    }
+
+    function uploadFile(file) {
+        var placeholder = { filename: file.name, status: 'uploading', id: null, kind: null };
+        pendingAttachments.push(placeholder);
+        renderPendingAttachments();
+
+        var body = new FormData();
+        body.append('file', file);
+        if (conversationId) { body.append('conversation_id', conversationId); }
+
+        // Pas de Content-Type explicite : le navigateur doit poser lui-meme la
+        // frontiere multipart, celle de headers() (JSON) casserait l'upload.
+        fetch(app.dataset.uploadEndpoint, {
+            method: 'POST',
+            headers: { 'X-Requested-With': 'XMLHttpRequest', 'X-CSRF-Token': window.mauticAjaxCsrf || '' },
+            body: body
+        })
+            .then(function (r) { return r.json().then(function (data) { return { ok: r.ok, data: data }; }); })
+            .then(function (result) {
+                if (!result.ok) {
+                    placeholder.status = 'error';
+                    placeholder.filename = file.name + ' : ' + (result.data.error || 'echec');
+                    renderPendingAttachments();
+                    return;
+                }
+                placeholder.id       = result.data.id;
+                placeholder.filename = result.data.filename;
+                placeholder.kind     = result.data.kind;
+                placeholder.status   = 'ok';
+                renderPendingAttachments();
+            })
+            .catch(function () {
+                placeholder.status = 'error';
+                placeholder.filename = file.name + ' : erreur reseau';
+                renderPendingAttachments();
+            });
+    }
+
+    if (attachBtn) {
+        attachBtn.addEventListener('click', function () { fileInput.click(); });
+        fileInput.addEventListener('change', function () {
+            Array.prototype.forEach.call(fileInput.files, uploadFile);
+            fileInput.value = '';
+        });
+    }
+
     function setUsage(usage) {
         if (!usageEl || !usage) { return; }
         var quota = parseInt(usageEl.dataset.quota || '0', 10);
@@ -486,6 +602,9 @@
                 log.innerHTML = '';
                 (data.transcript || []).forEach(function (message) {
                     bubble(message.text, message.role === 'user' ? 'user' : 'assistant');
+                    if (message.attachments && message.attachments.length) {
+                        attachmentsRow(message.attachments);
+                    }
                     if (message.tools && message.tools.length) {
                         var wrap = traceContainer();
                         message.tools.forEach(function (tool) {
@@ -663,12 +782,20 @@
 
     function submit() {
         var message = input.value.trim();
-        if (!message || busy) { return; }
+        var readyAttachments = pendingAttachments.filter(function (a) { return a.status === 'ok'; });
+        var stillUploading   = pendingAttachments.some(function (a) { return a.status === 'uploading'; });
+
+        // Un message peut n'etre qu'une piece jointe (ex. "importe ce fichier"
+        // sous-entendu par l'upload seul), mais pas ni texte ni fichier.
+        if ((!message && !readyAttachments.length) || busy || stillUploading) { return; }
 
         busy = true;
         send.disabled = true;
         input.value = '';
         bubble(message, 'user');
+        if (readyAttachments.length) { attachmentsRow(readyAttachments); }
+        pendingAttachments = [];
+        renderPendingAttachments();
 
         var pending = bubble('', 'assistant');
         pending.classList.add('witty-cursor');
@@ -678,7 +805,8 @@
             message: message,
             conversation_id: conversationId,
             provider: providers.length ? providerSelect.value : null,
-            model: providers.length ? modelSelect.value.trim() : null
+            model: providers.length ? modelSelect.value.trim() : null,
+            attachment_ids: readyAttachments.map(function (a) { return a.id; })
         };
 
         var request = fetch(streaming ? app.dataset.streamEndpoint : app.dataset.sendEndpoint, {

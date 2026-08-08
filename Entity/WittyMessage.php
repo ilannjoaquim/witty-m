@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MauticPlugin\WittyBundle\Entity;
 
+use Doctrine\Common\Collections\ArrayCollection;
+use Doctrine\Common\Collections\Collection;
 use Doctrine\ORM\Mapping as ORM;
 use Mautic\CoreBundle\Doctrine\Mapping\ClassMetadataBuilder;
 use MauticPlugin\WittyBundle\Service\Llm\Dto\Message;
@@ -38,9 +40,13 @@ class WittyMessage
 
     private \DateTimeInterface $dateAdded;
 
+    /** @var Collection<int, WittyAttachment> */
+    private Collection $attachments;
+
     public function __construct()
     {
-        $this->dateAdded = new \DateTimeImmutable();
+        $this->dateAdded  = new \DateTimeImmutable();
+        $this->attachments = new ArrayCollection();
     }
 
     public static function loadMetadata(ORM\ClassMetadata $metadata): void
@@ -67,6 +73,13 @@ class WittyMessage
         $builder->addNamedField('promptTokens', 'integer', 'prompt_tokens');
         $builder->addNamedField('completionTokens', 'integer', 'completion_tokens');
         $builder->addNamedField('dateAdded', 'datetime', 'date_added');
+
+        // Pas de cascade : une piece jointe est geree par AttachmentManager
+        // (upload avant l'existence meme du message), pas par le cycle de vie
+        // du message qui la reference.
+        $builder->createOneToMany('attachments', WittyAttachment::class)
+            ->mappedBy('message')
+            ->build();
     }
 
     /**
@@ -169,5 +182,21 @@ class WittyMessage
     public function getDateAdded(): \DateTimeInterface
     {
         return $this->dateAdded;
+    }
+
+    /**
+     * @return Collection<int, WittyAttachment>
+     */
+    public function getAttachments(): Collection
+    {
+        return $this->attachments;
+    }
+
+    public function addAttachment(WittyAttachment $attachment): self
+    {
+        $attachment->setMessage($this);
+        $this->attachments->add($attachment);
+
+        return $this;
     }
 }

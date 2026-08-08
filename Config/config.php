@@ -17,7 +17,7 @@ return [
     // Le changement de version declenche Engine::up() sur Migrations/ au prochain
     // mautic:plugins:reload : c'est ce qui cree les tables sur une instance ou le
     // plugin etait deja installe.
-    'version'     => '2.5.1',
+    'version'     => '2.6.0',
     'author'      => 'Witty',
 
     'routes' => [
@@ -34,6 +34,11 @@ return [
             'witty_chat_stream' => [
                 'path'       => '/witty/stream',
                 'controller' => WittyController::class.'::streamAction',
+                'method'     => 'POST',
+            ],
+            'witty_chat_upload' => [
+                'path'       => '/witty/upload',
+                'controller' => WittyController::class.'::uploadAction',
                 'method'     => 'POST',
             ],
             'witty_conversations' => [

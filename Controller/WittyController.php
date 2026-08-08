@@ -7,12 +7,15 @@ namespace MauticPlugin\WittyBundle\Controller;
 use Mautic\CoreBundle\Controller\CommonController;
 use MauticPlugin\WittyBundle\Entity\WittyConversation;
 use MauticPlugin\WittyBundle\Service\Agent\AgentRunner;
+use MauticPlugin\WittyBundle\Service\Attachment\AttachmentManager;
+use MauticPlugin\WittyBundle\Service\Attachment\Exception\AttachmentInvalidException;
 use MauticPlugin\WittyBundle\Service\Conversation\ConversationManager;
 use MauticPlugin\WittyBundle\Service\Conversation\ConversationNotFoundException;
 use MauticPlugin\WittyBundle\Service\Llm\ModelCatalog;
 use MauticPlugin\WittyBundle\Service\Usage\QuotaExceededException;
 use MauticPlugin\WittyBundle\Service\Usage\UsageGuard;
 use MauticPlugin\WittyBundle\Service\WittyConfig;
+use Symfony\Component\HttpFoundation\File\UploadedFile;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -64,11 +67,11 @@ class WittyController extends CommonController
             return new JsonResponse(['error' => 'Payload invalide.'], Response::HTTP_BAD_REQUEST);
         }
 
-        [$message, $conversationId, $provider, $model] = $payload;
+        [$message, $conversationId, $provider, $model, $attachmentIds] = $payload;
 
         try {
             $conversation = $conversations->resolve($conversationId);
-            $result       = $agentRunner->run($conversation, $message, null, $provider, $model);
+            $result       = $agentRunner->run($conversation, $message, null, $provider, $model, $attachmentIds);
         } catch (ConversationNotFoundException $e) {
             return new JsonResponse(['error' => $e->getMessage()], Response::HTTP_NOT_FOUND);
         } catch (QuotaExceededException $e) {
@@ -91,13 +94,13 @@ class WittyController extends CommonController
             return new JsonResponse(['error' => 'Payload invalide.'], Response::HTTP_BAD_REQUEST);
         }
 
-        [$message, $conversationId, $provider, $model] = $payload;
+        [$message, $conversationId, $provider, $model, $attachmentIds] = $payload;
 
         // La session est verrouillee pendant toute la requete : sans fermeture
         // explicite, le reste de l'interface Mautic attendrait la fin du flux.
         $request->getSession()->save();
 
-        $response = new StreamedResponse(function () use ($agentRunner, $conversations, $message, $conversationId, $provider, $model): void {
+        $response = new StreamedResponse(function () use ($agentRunner, $conversations, $message, $conversationId, $provider, $model, $attachmentIds): void {
             $emit = function (string $event, array $data): void {
                 echo 'event: '.$event."\n";
                 echo 'data: '.json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)."\n\n";
@@ -113,7 +116,7 @@ class WittyController extends CommonController
 
             try {
                 $conversation = $conversations->resolve($conversationId);
-                $result       = $agentRunner->run($conversation, $message, $emit, $provider, $model);
+                $result       = $agentRunner->run($conversation, $message, $emit, $provider, $model, $attachmentIds);
 
                 $emit('done', $result + ['conversation_id' => $conversation->getId()]);
             } catch (ConversationNotFoundException|QuotaExceededException $e) {
@@ -201,7 +204,47 @@ class WittyController extends CommonController
     }
 
     /**
-     * @return array{0: string, 1: int|null, 2: string|null, 3: string|null}|null
+     * Upload d'une piece jointe, independamment de l'envoi du message : le
+     * fichier doit etre pret (id obtenu) avant que l'utilisateur clique
+     * Envoyer, cf. AgentRunner::run()/attachment_ids ci-dessus.
+     */
+    public function uploadAction(Request $request, AttachmentManager $attachments, ConversationManager $conversations): JsonResponse
+    {
+        $file = $request->files->get('file');
+
+        if (!$file instanceof UploadedFile || !$file->isValid()) {
+            return new JsonResponse(['error' => 'Aucun fichier valide recu.'], Response::HTTP_BAD_REQUEST);
+        }
+
+        $conversation   = null;
+        $conversationId = $request->request->get('conversation_id');
+
+        if (is_numeric($conversationId)) {
+            try {
+                $conversation = $conversations->resolve((int) $conversationId);
+            } catch (ConversationNotFoundException) {
+                // Fil pas encore cree cote serveur (nouvelle conversation) :
+                // l'upload reste valable, il sera rattache au vrai id a l'envoi.
+            }
+        }
+
+        try {
+            $attachment = $attachments->upload($file, $conversation);
+        } catch (AttachmentInvalidException $e) {
+            return new JsonResponse(['error' => $e->getMessage()], Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        return new JsonResponse([
+            'id'        => $attachment->getId(),
+            'filename'  => $attachment->getOriginalFilename(),
+            'kind'      => $attachment->getKind(),
+            'size'      => $attachment->getSize(),
+            'asset_url' => $attachments->assetUrl($attachment),
+        ]);
+    }
+
+    /**
+     * @return array{0: string, 1: int|null, 2: string|null, 3: string|null, 4: int[]}|null
      */
     private function decode(Request $request): ?array
     {
@@ -213,7 +256,14 @@ class WittyController extends CommonController
 
         $message = trim((string) ($payload['message'] ?? ''));
 
-        if ('' === $message) {
+        $attachmentIds = array_values(array_filter(
+            array_map('intval', (array) ($payload['attachment_ids'] ?? [])),
+            static fn (int $id): bool => $id > 0,
+        ));
+
+        // Un message peut n'etre qu'une piece jointe (ex. l'utilisateur joint
+        // un fichier sans rien ecrire), mais pas ni texte ni fichier.
+        if ('' === $message && [] === $attachmentIds) {
             return null;
         }
 
@@ -224,6 +274,6 @@ class WittyController extends CommonController
         $provider = trim((string) ($payload['provider'] ?? ''));
         $model    = trim((string) ($payload['model'] ?? ''));
 
-        return [$message, $conversationId, '' !== $provider ? $provider : null, '' !== $model ? $model : null];
+        return [$message, $conversationId, '' !== $provider ? $provider : null, '' !== $model ? $model : null, $attachmentIds];
     }
 }

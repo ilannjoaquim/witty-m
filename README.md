@@ -200,6 +200,50 @@ l'utilisateur) sans casser les outils Mautic locaux.
   ils passent uniquement par l'infrastructure Bright Data. `AuditLogger` les journalise comme
   n'importe quel autre outil.
 
+### Pièces jointes (docs, tableurs, images)
+
+Un bouton trombone dans le chat permet de joindre un fichier (image, CSV/XLS/XLSX, texte, PDF/
+Office) à un message — ex. importer une liste de leads, ou fournir une image à réutiliser dans un
+email. L'upload se fait à la sélection du fichier, pas à l'envoi du message : `POST /witty/upload`
+(`WittyController::uploadAction()`) renvoie immédiatement un id, que le front inclut dans
+`attachment_ids` au moment d'envoyer le message.
+
+- **`Entity/WittyAttachment.php`** — `conversation` et `message` sont **nullables** : l'upload
+  précède forcément la création du message (voire de la conversation, pour un tout nouveau fil).
+  Le rattachement se fait par référence d'objet (`AttachmentManager::attachToConversation()`,
+  appelé depuis `AgentRunner::run()`), jamais par id scalaire — Doctrine résout l'ordre d'INSERT au
+  flush unique de fin de tour, pas besoin de flush intermédiaire.
+- **`Service/Attachment/AttachmentManager.php`** — deux destinations selon le type : image/document
+  deviennent un `Asset` Mautic **local** (`Asset::setFile()` + `preUpload()` + `upload()`, publié
+  immédiatement — contrairement aux objets créés par l'agent, un fichier vient explicitement de
+  l'utilisateur, le laisser en brouillon casserait le cas d'usage "image utilisable tout de suite
+  dans un email") ; tableur/texte restent de simples fichiers de travail sous `media/witty/uploads/`,
+  jamais publiés. Extension et taille validées contre une allowlist propre au plugin, plafonnée par
+  la politique globale du site (`allowed_extensions`/`max_size`).
+- **`read_attachment`** / **`import_leads_from_file`** (`Service/Tool/Tools/`) — l'agent inspecte
+  une pièce jointe par son id avant d'agir : texte (contenu tronqué), tableur (en-têtes + aperçu via
+  `Service/Attachment/SpreadsheetReader.php`, `phpoffice/phpspreadsheet`, déjà une dépendance
+  Mautic), image/document (URL d'asset seulement, pas de lecture textuelle). L'import de leads est
+  synchrone et plafonné à 500 lignes plutôt que branché sur le moteur d'import asynchrone natif de
+  Mautic (`LeadBundle\Model\ImportModel`, pensé pour un assistant pas-à-pas + cron) — suffisant pour
+  une liste de quelques centaines de contacts, largement le cas d'usage visé depuis le chat.
+- **Mention côté modèle, pas côté affichage** — `ConversationManager::toMessages()` ajoute une note
+  `[Pièce jointe : nom (type, id=N)]` au texte envoyé au modèle quand le message a des pièces
+  jointes (`WittyMessage::$attachments`, relation `OneToMany` en mémoire, fonctionne même avant
+  flush). Le contenu persisté (`WittyMessage::content`) et la bulle affichée
+  (`toDisplayTranscript()`) restent exactement ce que l'utilisateur a tapé — aucune duplication
+  visuelle de la note technique.
+- **Nettoyage** — un fichier joint puis jamais envoyé (onglet fermé avant Envoyer) reste orphelin
+  (`conversation` null) ; `php bin/console witty:attachments:prune-orphans` le supprime après 24h
+  de grâce (fichier ou Asset, et ligne en base). À planifier via le cron système, comme
+  `witty:meet:reconcile-attendance` (Mautic n'a pas d'ordonnanceur interne).
+- **Hors scope volontaire** — pas de vision multimodale (le modèle ne "voit" jamais les pixels d'une
+  image, seulement son id et son URL d'asset) : aucun des deux cas d'usage demandés (import de
+  leads, image dans un email) n'en avait besoin, et ça aurait touché `Service/Llm/*` (DTO + les 4
+  providers). Pas d'extraction de texte des PDF/Word non plus (nécessiterait une nouvelle
+  dépendance, `smalot/pdfparser`/`phpoffice/phpword`) : un PDF/Word joint devient un Asset
+  téléchargeable, mais son contenu textuel n'est pas lu par l'agent.
+
 ---
 
 ## Développement local
@@ -369,6 +413,8 @@ catalogue le rend automatiquement listable/renommable/supprimable sans toucher c
 | `list_meet_recordings` | | Enregistrements et/ou artefacts plugNmeet |
 | `delete_meet_recording` | ● | Supprime un enregistrement ou un artefact, définitif |
 | `convert_meet_recording_to_asset` | ● | Republie un enregistrement comme Asset Mautic (partageable par email) |
+| `read_attachment` | | Lit une piece jointe du chat (texte, apercu de tableur, ou URL d'asset pour image/document) |
+| `import_leads_from_file` | ● | Import de contacts depuis un tableur joint, plafonne a 500 lignes, mapping de colonnes fourni par l'agent |
 
 `update_entity` et `delete_entity` acceptent plusieurs types d'objets : leur permission ne peut
 donc pas être déclarée une fois pour toutes sur l'outil, elle est vérifiée **objet par objet**

@@ -7,9 +7,11 @@ namespace MauticPlugin\WittyBundle\Service\Conversation;
 use Doctrine\ORM\EntityManagerInterface;
 use Mautic\CoreBundle\Helper\UserHelper;
 use Mautic\UserBundle\Entity\User;
+use MauticPlugin\WittyBundle\Entity\WittyAttachment;
 use MauticPlugin\WittyBundle\Entity\WittyConversation;
 use MauticPlugin\WittyBundle\Entity\WittyConversationRepository;
 use MauticPlugin\WittyBundle\Entity\WittyMessage;
+use MauticPlugin\WittyBundle\Service\Attachment\AttachmentManager;
 use MauticPlugin\WittyBundle\Service\Llm\Dto\Message;
 use MauticPlugin\WittyBundle\Service\Llm\Dto\Usage;
 
@@ -26,6 +28,7 @@ class ConversationManager
     public function __construct(
         private EntityManagerInterface $entityManager,
         private UserHelper $userHelper,
+        private AttachmentManager $attachments,
     ) {
     }
 
@@ -72,10 +75,43 @@ class ConversationManager
         $messages = [];
 
         foreach ($conversation->getMessages() as $message) {
-            $messages[] = $message->toDto();
+            $messages[] = $this->withAttachmentNotes($message);
         }
 
         return $messages;
+    }
+
+    /**
+     * Le contenu persiste (WittyMessage::content) reste exactement ce que
+     * l'utilisateur a tape : la mention des pieces jointes n'est ajoutee
+     * qu'ici, cote modele, pas dans la bulle affichee (toDisplayTranscript()
+     * reste inchange). Purement en memoire (Collection deja chargee via
+     * WittyMessage::$attachments) : aucune requete supplementaire, ca marche
+     * aussi bien pour le message qu'on vient d'ajouter (pas encore flush,
+     * donc sans id) que pour l'historique rechargé depuis la base.
+     */
+    private function withAttachmentNotes(WittyMessage $message): Message
+    {
+        $dto = $message->toDto();
+
+        if (Message::ROLE_USER !== $message->getRole() || $message->getAttachments()->isEmpty()) {
+            return $dto;
+        }
+
+        $notes = [];
+
+        foreach ($message->getAttachments() as $attachment) {
+            $notes[] = sprintf(
+                '[Piece jointe : %s (%s, id=%d)]',
+                $attachment->getOriginalFilename(),
+                $attachment->getKind(),
+                (int) $attachment->getId(),
+            );
+        }
+
+        $content = trim(($dto->content ?? '')."\n\n".implode("\n", $notes));
+
+        return new Message($dto->role, $content, $dto->toolCalls, $dto->toolCallId, $dto->toolName);
     }
 
     public function append(WittyConversation $conversation, Message $dto, ?Usage $usage = null): WittyMessage
@@ -156,11 +192,20 @@ class ConversationManager
             }
 
             $transcript[] = [
-                'role'  => $message->getRole(),
-                'text'  => $content,
-                'tools' => array_map(
+                'role'        => $message->getRole(),
+                'text'        => $content,
+                'tools'       => array_map(
                     static fn (array $call): string => (string) ($call['name'] ?? ''),
                     $message->getToolCalls(),
+                ),
+                'attachments' => array_map(
+                    fn (WittyAttachment $a): array => [
+                        'id'        => $a->getId(),
+                        'filename'  => $a->getOriginalFilename(),
+                        'kind'      => $a->getKind(),
+                        'asset_url' => $this->attachments->assetUrl($a),
+                    ],
+                    $message->getAttachments()->toArray(),
                 ),
             ];
         }

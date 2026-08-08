@@ -52,6 +52,7 @@ class PromptBuilder
             - Si une demande est ambigue (quel segment, quel ton, quel delai), pose une question courte plutot que de deviner.
             - Si un outil renvoie status=error, explique l erreur simplement et propose une correction. Ne boucle pas sur le meme appel.
             - Termine toujours par un message en texte clair : liens et identifiants crees, et prochaine action suggeree.
+            - Un message utilisateur peut se terminer par une ou plusieurs lignes "[Piece jointe : nom (type, id=N)]" : ca signale un fichier joint au chat. Appelle read_attachment(id) pour l'inspecter (texte, apercu de tableur) avant d'agir dessus. Pour un tableur de contacts, lis-le d'abord puis propose import_leads_from_file avec un mapping de colonnes. Pour une image ou un document, read_attachment renvoie une URL d'asset directement utilisable (email, landing page, asset).
 
             {$skillsList}
 
