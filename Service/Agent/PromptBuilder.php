@@ -26,6 +26,7 @@ class PromptBuilder
         $siteUrl  = (string) $this->parameters->get('site_url');
 
         $skillsList = $this->buildSkillsList();
+        $webAccess  = $this->buildWebAccessNote();
 
         $confirmation = $this->config->requiresConfirmation()
             ? "Le mode confirmation est ACTIF. Tout outil d ecriture renvoie d abord status=confirmation_required avec un apercu. "
@@ -54,8 +55,27 @@ class PromptBuilder
 
             {$skillsList}
 
+            {$webAccess}
+
             {$confirmation}
             PROMPT;
+    }
+
+    /**
+     * Les outils prefixes brightdata_ (recherche, scraping) n'apparaissent
+     * dans la liste d'outils que si la cle API est renseignee : ce rappel
+     * evite au modele de conclure a tort qu'il n'a jamais acces au web.
+     */
+    private function buildWebAccessNote(): string
+    {
+        if (!$this->config->isBrightDataConfigured()) {
+            return 'Aucun acces internet configure : tu ne peux pas naviguer sur le web ni scraper de pages. '
+                ."Dis-le si l utilisateur te le demande, ne l invente jamais.";
+        }
+
+        return 'Tu disposes d outils de recherche et de scraping web (prefixe brightdata_, decouverts en direct '
+            ."sur le serveur Bright Data). Utilise-les pour toute question necessitant une information a jour ou "
+            .'externe a Mautic ; cite tes sources quand c est pertinent.';
     }
 
     /**

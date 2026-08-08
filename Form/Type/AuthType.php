@@ -77,6 +77,21 @@ class AuthType extends AbstractType
             ],
             'label_attr'   => ['class' => 'control-label'],
         ]);
+
+        // Bright Data (MCP) est une capacite facultative independante des
+        // fournisseurs IA, meme logique que plugNmeet : ni comptee ni requise
+        // par la contrainte "au moins une cle" ci-dessous.
+        $builder->add('brightdata_api_key', PasswordType::class, [
+            'label'        => 'mautic.witty.config.brightdata.api_key',
+            'required'     => false,
+            'always_empty' => false,
+            'attr'         => [
+                'class'        => 'form-control',
+                'autocomplete' => 'off',
+                'tooltip'      => 'mautic.witty.config.brightdata.api_key.tooltip',
+            ],
+            'label_attr'   => ['class' => 'control-label'],
+        ]);
     }
 
     public function configureOptions(OptionsResolver $resolver): void

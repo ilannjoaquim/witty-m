@@ -80,6 +80,35 @@ class WittyConfigTest extends TestCase
         $this->assertSame('Google (Gemini)', $config->getProviderLabel('gemini'));
     }
 
+    public function testBrightDataIsIndependentFromAiProviderKeys(): void
+    {
+        // Aucune cle fournisseur IA, seulement Bright Data : ne doit ni rendre
+        // le plugin "configure" au sens des fournisseurs, ni planter.
+        $config = $this->configWith(true, ['brightdata_api_key' => 'bd-token-123']);
+
+        $this->assertTrue($config->isBrightDataConfigured());
+        $this->assertSame('bd-token-123', $config->getBrightDataApiKey());
+        $this->assertSame([], $config->getConfiguredProviders(), 'Bright Data n est pas un fournisseur de modele.');
+    }
+
+    public function testBrightDataRequiresAPublishedIntegrationLikeOtherKeys(): void
+    {
+        $config = $this->configWith(false, ['brightdata_api_key' => 'bd-token-123']);
+
+        $this->assertFalse($config->isBrightDataConfigured(), 'Un plugin desactive ne doit exposer aucune capacite, meme avec une cle presente.');
+    }
+
+    public function testBrightDataProModeDefaultsToDisabled(): void
+    {
+        $config = $this->configWith(true, ['brightdata_api_key' => 'bd-token-123'], []);
+
+        $this->assertFalse($config->isBrightDataProModeEnabled());
+
+        $config = $this->configWith(true, ['brightdata_api_key' => 'bd-token-123'], ['brightdata_pro_mode' => true]);
+
+        $this->assertTrue($config->isBrightDataProModeEnabled());
+    }
+
     /**
      * @param array<string, string> $apiKeys
      * @param array<string, string> $featureSettings

@@ -60,6 +60,7 @@ class FeatureSettingsType extends AbstractType
                 'streaming'             => true,
                 'daily_token_quota'     => 0,
                 'plugnmeet_server_url'  => '',
+                'brightdata_pro_mode'   => false,
             ]);
         });
 
@@ -120,6 +121,13 @@ class FeatureSettingsType extends AbstractType
                 'tooltip'     => 'mautic.witty.config.plugnmeet.server_url.tooltip',
             ],
             'label_attr' => ['class' => 'control-label'],
+        ]);
+
+        // Cle Bright Data dans l'onglet Details (AuthType), comme les cles des
+        // fournisseurs IA ; seul le reglage non sensible (mode Pro) est ici.
+        $builder->add('brightdata_pro_mode', YesNoButtonGroupType::class, [
+            'label' => 'mautic.witty.config.brightdata.pro_mode',
+            'attr'  => ['tooltip' => 'mautic.witty.config.brightdata.pro_mode.tooltip'],
         ]);
 
         // Affichage : logo et favicon personnalises. 'mapped' => false : ce sont

@@ -126,6 +126,32 @@ class WittyConfig
             && '' !== $this->getPlugNmeetApiSecret();
     }
 
+    /**
+     * Jeton du serveur MCP distant Bright Data (recherche web, scraping) —
+     * https://mcp.brightdata.com/mcp?token=... Independant des fournisseurs IA :
+     * c'est une capacite de l'agent, pas un fournisseur de modele.
+     */
+    public function getBrightDataApiKey(): string
+    {
+        $configuration = $this->getConfiguration();
+
+        return null === $configuration ? '' : trim((string) ($configuration->getApiKeys()['brightdata_api_key'] ?? ''));
+    }
+
+    public function isBrightDataConfigured(): bool
+    {
+        return $this->isPublished() && '' !== $this->getBrightDataApiKey();
+    }
+
+    /**
+     * Mode Pro Bright Data : deverrouille une soixantaine d'outils (au lieu des
+     * cinq du plan gratuit) mais consomme davantage de credits par appel.
+     */
+    public function isBrightDataProModeEnabled(): bool
+    {
+        return (bool) ($this->getFeatureSettings()['brightdata_pro_mode'] ?? false);
+    }
+
     public function getApiKey(string $provider): string
     {
         $configuration = $this->getConfiguration();

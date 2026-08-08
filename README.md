@@ -30,8 +30,8 @@ Puis **Paramètres › Plugins › Witty** :
 
 | Onglet | Contenu |
 |---|---|
-| Details | activation du plugin + une clé API par fournisseur (au moins une) + clé/secret plugNmeet (facultatif) |
-| Fonctionnalités | modèle par défaut par fournisseur (facultatif), itérations max, confirmation avant écriture, streaming, quota de tokens, URL du serveur plugNmeet |
+| Details | activation du plugin + une clé API par fournisseur (au moins une) + clé/secret plugNmeet (facultatif) + clé Bright Data (facultatif) |
+| Fonctionnalités | modèle par défaut par fournisseur (facultatif), itérations max, confirmation avant écriture, streaming, quota de tokens, URL du serveur plugNmeet, mode Pro Bright Data |
 
 Enregistrer avec **Sauvegarder et fermer**. Le chat est ensuite accessible dans le menu
 principal (`/s/witty`), et le journal des actions dans le menu d'administration (`/s/witty/audit`).
@@ -171,6 +171,35 @@ plugNmeet, seulement une URL Mautic stable qui le génère à la volée à chaqu
   est appliqué partout où ce schéma apparaît (`MeetJoinController`,
   `ReconcileMeetAttendanceCommand`).
 
+### Recherche et navigation web (Bright Data, MCP)
+
+Une clé API Bright Data (**Details**) donne à l'agent l'accès au [serveur MCP distant de Bright
+Data](https://docs.brightdata.com/ai/mcp-server/remote/quickstart) — recherche web, scraping de
+pages en markdown, et jusqu'à une soixantaine d'outils avancés en mode Pro (**Fonctionnalités**).
+Contrairement aux autres outils du plugin, ceux-ci ne sont **pas** codés en dur : `ToolRegistry`
+interroge le serveur en direct (`tools/list`) à chaque tour et relaie tout ce qu'il annonce, sous
+le nom `brightdata_<nom distant>` (ex. `brightdata_search_engine`). Une clé retirée ou un serveur
+en panne désactive silencieusement la capacité (erreur journalisée, jamais remontée à
+l'utilisateur) sans casser les outils Mautic locaux.
+
+- **`Service/Mcp/McpClientInterface.php`** — contrat d'un serveur MCP distant (`isConfigured()`,
+  `listTools()`, `callTool()`). Un deuxième fournisseur MCP s'ajoute en déposant une classe qui
+  l'implémente, taguée automatiquement `witty.mcp_client` par autoconfiguration — même principe
+  que `witty.tool` pour les outils locaux.
+- **`Service/Mcp/BrightDataMcpClient.php`** — client JSON-RPC 2.0 en "Streamable HTTP" (spec MCP) :
+  poignée de main `initialize` / `notifications/initialized` à la première requête, session
+  réutilisée (en-tête `Mcp-Session-Id`) pour tout le tour de l'agent. Le serveur peut répondre en
+  JSON simple ou en flux SSE, les deux sont gérés. Authentification par jeton en query string
+  (`?token=...`), pas par en-tête — un choix propre à ce serveur, pas une convention MCP générale.
+- **`Service/Tool/McpTool.php`** — adaptateur `ToolInterface` construit à la volée par
+  `ToolRegistry` pour chaque outil découvert. **Exclu** du chargement générique de
+  `Config/services.php` (comme les objets de valeur `Dto/`) : le laisser dans l'autowiring ferait
+  échouer la compilation du conteneur sur ses arguments scalaires, puisqu'aucune valeur n'est
+  connue à la compilation, seulement à l'exécution.
+- **Sécurité** — ces outils ne touchent jamais Mautic (pas de permission, pas d'écriture en base) :
+  ils passent uniquement par l'infrastructure Bright Data. `AuditLogger` les journalise comme
+  n'importe quel autre outil.
+
 ---
 
 ## Développement local
@@ -282,6 +311,11 @@ Trois points appliqués par le registre :
   `confirmed: true`. Désactivable en configuration.
 - **Non-publication** — tout ce qui est créé l'est en brouillon.
 
+Pour un outil qui n'agit pas sur Mautic mais relaie un serveur MCP externe (voir [Recherche et
+navigation web](#recherche-et-navigation-web-bright-data-mcp)), implémenter `McpClientInterface`
+plutôt que `ToolInterface` : le registre décrit ses outils lui-même, il n'y a rien à écrire par
+outil distant.
+
 ### Outils disponibles
 
 `list_entities` / `update_entity` / `delete_entity` sont génériques : ils s'appuient sur
@@ -349,6 +383,10 @@ participants).
 Contact et Company n'entrent pas dans `EntityCatalog` (pas de notion de publication, champs
 personnalisés au lieu de name/description) : ils gardent leurs outils dédiés
 (`create_contact`/`update_contact`, `create_company`/`update_company`/`search_companies`).
+
+Ce tableau ne liste que les outils Mautic locaux, connus à la compilation. Si une clé Bright Data
+est renseignée, des outils supplémentaires `brightdata_*` (recherche web, scraping) apparaissent
+en plus, découverts en direct — voir [Recherche et navigation web](#recherche-et-navigation-web-bright-data-mcp).
 
 ### Thèmes d'email
 
@@ -574,6 +612,15 @@ SSE, persistance, journal d'audit, quota — a été vérifié via HTTP sur cett
    ne doit rien proposer sur les tables `witty_*` après coup.
 3. **`iconClass` du menu** (`Config/config.php`) — bascule sur `fa fa-magic` si l'icône Remix
    ne s'affiche pas dans ton thème.
+4. **Champs de clé API toujours vides à l'ouverture** — comportement Symfony normal
+   (`PasswordType::buildView()` force `value = ''` hors resoumission), pas un bug de chargement :
+   les clés sont bien là, seulement pas ré-affichées, par sécurité. Le vrai piège est que le
+   navigateur soumet donc `''` pour tout champ non retouché ; sans
+   `EventListener/ConfigKeysSubscriber.php` (écoute
+   `IntegrationEvents::INTEGRATION_API_KEYS_BEFORE_SAVE`, restaure toute clé soumise vide à partir
+   de sa valeur précédente), enregistrer le formulaire pour n'ajouter qu'une seule clé (ex. Bright
+   Data) effacerait silencieusement toutes les autres. Contrepartie : une clé une fois enregistrée
+   ne peut plus être vidée en laissant le champ blanc — il faut la remplacer par autre chose.
 
 Les identifiants de modèles par défaut (`WittyConfig::DEFAULT_MODELS`) ne servent plus qu'au repli
 (`ModelCatalog`, si l'appel `listModels()` échoue) et à présélectionner une valeur avant le premier

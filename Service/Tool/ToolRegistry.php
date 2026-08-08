@@ -8,6 +8,7 @@ use Mautic\CoreBundle\Security\Permissions\CorePermissions;
 use MauticPlugin\WittyBundle\Entity\WittyAuditLog;
 use MauticPlugin\WittyBundle\Entity\WittyConversation;
 use MauticPlugin\WittyBundle\Service\Audit\AuditLogger;
+use MauticPlugin\WittyBundle\Service\Mcp\McpClientInterface;
 use MauticPlugin\WittyBundle\Service\WittyConfig;
 use Psr\Log\LoggerInterface;
 
@@ -16,8 +17,16 @@ class ToolRegistry
     /** @var array<string, ToolInterface> */
     private array $tools = [];
 
+    /** @var iterable<McpClientInterface> */
+    private iterable $mcpClients;
+
+    private bool $mcpToolsLoaded = false;
+
     /**
-     * @param iterable<ToolInterface> $tools
+     * @param iterable<ToolInterface>     $tools
+     * @param iterable<McpClientInterface> $mcpClients Serveurs MCP distants (ex. Bright Data) ;
+     *                                                  chacun ajoute ses outils a $this->tools au
+     *                                                  premier appel, voir ensureMcpToolsLoaded().
      */
     public function __construct(
         iterable $tools,
@@ -25,10 +34,13 @@ class ToolRegistry
         private WittyConfig $config,
         private AuditLogger $auditLogger,
         private LoggerInterface $logger,
+        iterable $mcpClients = [],
     ) {
         foreach ($tools as $tool) {
             $this->tools[$tool->getName()] = $tool;
         }
+
+        $this->mcpClients = $mcpClients;
     }
 
     /**
@@ -40,6 +52,8 @@ class ToolRegistry
      */
     public function getDefinitions(): array
     {
+        $this->ensureMcpToolsLoaded();
+
         $definitions = [];
 
         foreach ($this->tools as $tool) {
@@ -64,6 +78,8 @@ class ToolRegistry
      */
     public function execute(string $name, array $arguments, ?WittyConversation $conversation = null): array
     {
+        $this->ensureMcpToolsLoaded();
+
         $tool = $this->tools[$name] ?? null;
 
         if (null === $tool) {
@@ -98,6 +114,40 @@ class ToolRegistry
         $this->auditLogger->record($tool, $arguments, $output, $this->elapsed($startedAt), $conversation);
 
         return $output;
+    }
+
+    /**
+     * Interroge chaque serveur MCP configure (tools/list) et fusionne le
+     * resultat dans $this->tools, sous forme de McpTool. Une seule fois par
+     * requete : getDefinitions() est appele en debut de AgentRunner::run(),
+     * et execute() plusieurs fois ensuite dans la meme boucle — inutile de
+     * re-interroger Bright Data a chaque tool call.
+     *
+     * Un serveur MCP en panne ne doit pas empecher les outils Mautic locaux
+     * de fonctionner : l'echec est journalise et avale, pas remonte.
+     */
+    private function ensureMcpToolsLoaded(): void
+    {
+        if ($this->mcpToolsLoaded) {
+            return;
+        }
+
+        $this->mcpToolsLoaded = true;
+
+        foreach ($this->mcpClients as $client) {
+            if (!$client->isConfigured()) {
+                continue;
+            }
+
+            try {
+                foreach ($client->listTools() as $definition) {
+                    $tool = new McpTool($client, $definition['name'], $definition['description'], $definition['schema']);
+                    $this->tools[$tool->getName()] = $tool;
+                }
+            } catch (\Throwable $e) {
+                $this->logger->error('Witty MCP tool discovery failed', ['namespace' => $client->getNamespace(), 'exception' => $e]);
+            }
+        }
     }
 
     private function elapsed(float $startedAt): int
