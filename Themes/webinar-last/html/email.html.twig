@@ -43,18 +43,35 @@
 
   <mj-head>
 
+    <!--
+    Attributs par defaut MJML (mj-divider/mj-button) : safe a definir ici
+    plutot que balise par balise, aucune des deux n'a de css-class qui
+    pourrait entrer en conflit avec cette valeur par defaut.
+    - mj-divider 1px (au lieu des 4px par defaut MJML — "le filet trop gros").
+    - mj-button 16px (au lieu des 13px par defaut MJML — lisibilite CTA).
+    NE PAS faire pareil pour mj-text : ses classes (.h1/.h2/.h3...) definissent
+    chacune leur propre line-height dans le <mj-style> ci-dessous, et un
+    defaut mj-attributes se compile en style inline qui gagnerait contre
+    elles. Le line-height des paragraphes simples est donc pose directement
+    sur chaque <mj-text> concerne, plus bas dans le corps.
+    -->
+    <mj-attributes>
+      <mj-divider border-width="1px" border-color="#e5e5e5" />
+      <mj-button font-size="16px" />
+    </mj-attributes>
+
     <mj-style>
       @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700;800&amp;family=Inter:wght@300;400;500;600;700&amp;display=swap');
       .h1 { font-family: 'Poppins', sans-serif; font-size: 30px; font-weight: 700; line-height: 1.25; letter-spacing: -0.8px; color: #000000; }
       .h2 { font-family: 'Poppins', sans-serif; font-size: 18px; font-weight: 700; line-height: 1.35; letter-spacing: -0.4px; color: #000000; }
-      .lead { font-size: 18px; font-weight: 300; line-height: 1.6; color: #000000; }
+      .h3 { font-family: 'Poppins', sans-serif; font-size: 18px; font-weight: 600; line-height: 1.4; color: #000000; }
       .meta { font-size: 14px; font-weight: 500; color: #666666; }
       .micro { font-size: 12px; font-weight: 400; color: #999999; }
       .strong { font-weight: 600; }
       a { color: #000000; text-decoration: underline; }
       @media only screen and (max-width:480px) {
         .h1 { font-size: 25px !important; letter-spacing: -0.5px !important; }
-        .lead { font-size: 16px !important; }
+        .h3 { font-size: 16px !important; }
       }
     </mj-style>
   </mj-head>
@@ -103,6 +120,11 @@
     3. TITLE BLOCK -- THE PROMISE
     This is the area that decides everything: 80% of readers will only read
     this block. It holds 4 elements, in this exact order. Skip none of them.
+    Heading hierarchy on purpose: h1 (headline) -> h3 (subhead), both styled
+    as real headings rather than body text, so the block reads as impactful
+    at a glance instead of a wall of paragraphs. (Webinar Day 0 additionally
+    opens on an h2 hook line above the headline -- this template has no
+    equivalent line, so it starts directly on h1.)
     ==================================================================== -->
     <mj-section padding="16px 24px 0px">
       <mj-column>
@@ -132,7 +154,7 @@
         Ex. "We'll show you how to [result] in [time], even if [objection]".
         Stay concrete: a number always beats an adjective.
         -->
-        <mj-text css-class="lead" align="center" padding-bottom="14px">
+        <mj-text css-class="h3" align="center" padding-bottom="14px">
           [SUBHEADLINE -- 1 sentence: the concrete result + the constraint lifted. Ex. "How to produce X in under 1 hour, even without a team"]
         </mj-text>
 
@@ -208,7 +230,7 @@
         with no first name get "Hi ,". Mautic syntax:
         {contactfield=firstname|there}
         -->
-        <mj-text padding-bottom="20px">
+        <mj-text line-height="1.6" padding-bottom="20px">
           Hi <span class="atwho-inserted" data-fr-verified="true">{contactfield=firstname|there}</span>,
         </mj-text>
 
@@ -221,7 +243,7 @@
         BAN: "We're delighted to invite you..." (talking about yourself =
         stop).
         -->
-        <mj-text font-weight="400" padding-bottom="14px">
+        <mj-text font-weight="400" line-height="1.6" padding-bottom="14px">
           [PROBLEM -- 1 observation sentence describing the reader's reality. Ex. "In [year], the rules of [field] changed."]
         </mj-text>
 
@@ -233,7 +255,7 @@
         widening with competitors. Stay factual: exaggerated fear triggers
         rejection, not action.
         -->
-        <mj-text padding-bottom="20px">
+        <mj-text line-height="1.6" padding-bottom="20px">
           [AGITATION -- 2 to 3 sentences on the cost of inaction: wasted effort, lost time, accumulated delay.]
         </mj-text>
 
@@ -242,7 +264,7 @@
         WHY: a very short pivot sentence restarts the reading after the
         negative passage and positions you as the one holding the answer.
         -->
-        <mj-text font-weight="400" padding-bottom="20px">
+        <mj-text font-weight="400" line-height="1.6" padding-bottom="20px">
           [TRANSITION -- 1 short sentence. Ex. "Tomorrow, we fix that together."]
         </mj-text>
 
@@ -326,7 +348,7 @@
         <mj-text css-class="h2" padding-bottom="12px">
           🎁 [BONUS -- named precisely. Ex. "The [template/checklist/audit] offered to everyone who stays to the end"]
         </mj-text>
-        <mj-text>
+        <mj-text line-height="1.6">
           [PROOF OR SCARCITY -- 1 line. Ex. "Already used with more than 150 clients." or "Not downloadable anywhere else."]
         </mj-text>
       </mj-column>
@@ -349,7 +371,7 @@
     ==================================================================== -->
     <mj-section padding="36px 24px 0px">
       <mj-column>
-        <mj-text>
+        <mj-text line-height="1.6">
           [CLOSING -- 1 sentence with a TRUE urgency. Ex. "Registrations close tonight -- grab your seat:"]
         </mj-text>
       </mj-column>
@@ -371,20 +393,22 @@
 
     <!-- ====================================================================
     10. FOOTER -- LEGAL AND DELIVERABILITY
-    WHY: the postal address and the unsubscribe link are mandatory (GDPR /
-    CAN-SPAM) and watched by Gmail and Outlook. An easy unsubscribe beats a
-    spam complaint: a single "spam" hit weighs ~100x more than an
-    unsubscribe on your sending reputation.
+    WHY: the unsubscribe link is mandatory (GDPR / CAN-SPAM) and watched by
+    Gmail and Outlook. An easy unsubscribe beats a spam complaint: a single
+    "spam" hit weighs ~100x more than an unsubscribe on your sending
+    reputation.
+    The postal address line was removed on purpose (account owner's call).
+    Note for future editors: CAN-SPAM (US) and several other jurisdictions
+    still expect a physical postal address in every commercial email -- if
+    this list ever sends to those regions, put it back rather than assume
+    its absence was an oversight.
     HOW: do not touch the {webview_url} and {unsubscribe_url} tokens. Keep
     this block discreet (grey, small) but never hidden.
     ==================================================================== -->
     <mj-section padding="32px 24px 40px">
       <mj-column>
-        <mj-text align="center" font-family="'Poppins', sans-serif" font-size="15px" font-weight="600" padding-bottom="8px">
+        <mj-text align="center" font-family="'Poppins', sans-serif" font-size="15px" font-weight="600" padding-bottom="14px">
           [BRAND NAME]
-        </mj-text>
-        <mj-text align="center" css-class="meta" padding-bottom="18px">
-          [Full postal address -- legally required]
         </mj-text>
         <mj-text align="center" css-class="micro" padding-bottom="14px">
           This email was sent to <span class="atwho-inserted" data-fr-verified="true">{contactfield=email}</span>

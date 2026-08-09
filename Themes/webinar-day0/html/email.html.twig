@@ -55,13 +55,28 @@
   -->
 
   <mj-head>
+    <!--
+    Attributs par defaut MJML (mj-divider/mj-button) : safe a definir ici
+    plutot que balise par balise, aucune des deux n'a de css-class qui
+    pourrait entrer en conflit avec cette valeur par defaut.
+    - mj-divider 1px (au lieu des 4px par defaut MJML — "le filet trop gros").
+    - mj-button 16px (au lieu des 13px par defaut MJML — lisibilite CTA).
+    NE PAS faire pareil pour mj-text : ses classes (.h1/.h2/.h3/.lead...)
+    definissent chacune leur propre line-height dans le <mj-style> ci-dessous,
+    et un defaut mj-attributes se compile en style inline qui gagnerait
+    contre elles. Le line-height des paragraphes simples est donc pose
+    directement sur chaque <mj-text> concerne, plus bas dans le corps.
+    -->
+    <mj-attributes>
+      <mj-divider border-width="1px" border-color="#e5e5e5" />
+      <mj-button font-size="16px" />
+    </mj-attributes>
     <mj-style>
       @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700;800&amp;family=Inter:wght@300;400;500;600;700&amp;display=swap');
-      .hook { font-family: 'Poppins', sans-serif; font-size: 20px; font-weight: 700; line-height: 1.4; color: #000000; }
       .h1 { font-family: 'Poppins', sans-serif; font-size: 29px; font-weight: 700; line-height: 1.28; letter-spacing: -0.7px; color: #000000; }
       .h2 { font-family: 'Poppins', sans-serif; font-size: 24px; font-weight: 700; line-height: 1.3; letter-spacing: -0.5px; color: #000000; }
+      .h3 { font-family: 'Poppins', sans-serif; font-size: 18px; font-weight: 600; line-height: 1.4; color: #000000; }
       .eyebrow { font-family: 'Poppins', sans-serif; font-size: 13px; font-weight: 600; letter-spacing: 1.2px; text-transform: uppercase; color: #999999; }
-      .lead { font-size: 17px; font-weight: 300; line-height: 1.6; color: #000000; }
       .meta { font-size: 14px; font-weight: 500; color: #666666; }
       .micro { font-size: 12px; font-weight: 400; color: #999999; }
       .quote { font-style: italic; font-weight: 300; line-height: 1.7; color: #000000; }
@@ -69,9 +84,8 @@
       a { color: #000000; text-decoration: underline; }
       @media only screen and (max-width:480px) {
         .h1 { font-size: 24px !important; letter-spacing: -0.4px !important; }
-        .hook { font-size: 17px !important; }
         .h2 { font-size: 21px !important; }
-        .lead { font-size: 16px !important; }
+        .h3 { font-size: 16px !important; }
       }
     </mj-style>
   </mj-head>
@@ -119,6 +133,9 @@
     3. TITLE BLOCK — THE PROMISE
     Assume 80% of readers will only read this block. It has five parts, in
     this exact order. Don't skip any of them.
+    Heading hierarchy on purpose: h2 (hook) -> h1 (headline) -> h3 (subhead).
+    All three read as real headings, not body text — that's what makes the
+    block feel impactful at a glance instead of like a wall of paragraphs.
     ==================================================================== -->
     <mj-section padding="16px 24px 0px">
       <mj-column>
@@ -139,7 +156,7 @@
         Cultural or local references land hard here — but only if you share
         that culture with the reader. Never fake it.
         -->
-        <mj-text css-class="hook" align="center" padding-bottom="18px">
+        <mj-text css-class="h2" align="center" padding-bottom="18px">
           [HOOK — 2 short lines. Line 1: something they instantly agree with.<br />Line 2: the twist that opens your topic.]
         </mj-text>
 
@@ -169,7 +186,7 @@
         couldn't fit: "that actually generate qualified leads in [year]",
         "even if you're a team of one".
         -->
-        <mj-text css-class="lead" align="center" padding-bottom="14px">
+        <mj-text css-class="h3" align="center" padding-bottom="14px">
           [SUBHEADLINE — 1 line, the concrete measurable result. Ex. "That actually turn into qualified leads"]
         </mj-text>
 
@@ -251,7 +268,7 @@
         Also: no space before the comma. It's a small thing that instantly
         reads as automated.
         -->
-        <mj-text font-weight="400" padding-bottom="20px">
+        <mj-text font-weight="400" line-height="1.6" padding-bottom="20px">
           Hi <span class="atwho-inserted" data-fr-verified="true">{contactfield=firstname|there}</span>,
         </mj-text>
 
@@ -266,10 +283,10 @@
         BANNED: "We're excited to invite you to…" — that's about you, and
         that's where they stop reading.
         -->
-        <mj-text padding-bottom="14px">
+        <mj-text line-height="1.6" padding-bottom="14px">
           [SITUATION — 1 sentence describing the reader's constraint. Ex. "When you're the only one handling [X], [topic] turns into a puzzle."]
         </mj-text>
-        <mj-text padding-bottom="20px">
+        <mj-text line-height="1.6" padding-bottom="20px">
           [WHY NOW — 1 sentence on what changed recently and made it worse. Ex. "Especially since [change] took over in [year]."]
         </mj-text>
 
@@ -282,7 +299,7 @@
         scanned. Add the absolving clause — "and for good reason", "it's not
         their fault".
         -->
-        <mj-text font-weight="400" padding-bottom="20px">
+        <mj-text font-weight="400" line-height="1.6" padding-bottom="20px">
           [PROBLEM — 1 sentence. Ex. "The truth? Most [audience] are lost on this — and for good reason."]
         </mj-text>
 
@@ -318,10 +335,10 @@
         it's a real gap. Stay factual: exaggerated fear reads as manipulation
         and triggers the unsubscribe, not the click.
         -->
-        <mj-text font-weight="400" padding-bottom="12px">
+        <mj-text font-weight="400" line-height="1.6" padding-bottom="12px">
           [IMMEDIATE COST — 1 sentence. Ex. "So you keep moving in the dark, with no real way to know if any of it works."]
         </mj-text>
-        <mj-text font-weight="400" padding-bottom="20px">
+        <mj-text font-weight="400" line-height="1.6" padding-bottom="20px">
           [SLOW COST — 1 sentence on what keeps getting pushed back behind other priorities. 🫣]
         </mj-text>
 
@@ -332,7 +349,7 @@
         this. Short is the point — momentum matters more than eloquence.
         HOW: max 8 words. "That's exactly what we help you fix."
         -->
-        <mj-text>
+        <mj-text line-height="1.6">
           [PIVOT — 1 short line. Ex. "That's exactly what we help you fix."]
         </mj-text>
       </mj-column>
@@ -451,20 +468,22 @@
 
     <!-- ====================================================================
     8. FOOTER — LEGAL AND DELIVERABILITY
-    WHY: the postal address and unsubscribe link are legally required
-    (GDPR / CAN-SPAM) and actively monitored by Gmail and Outlook. An easy
-    unsubscribe is far better than a spam complaint: one complaint damages
-    your sending reputation roughly a hundred times more than one opt-out.
+    WHY: the unsubscribe link is legally required (GDPR / CAN-SPAM) and
+    actively monitored by Gmail and Outlook. An easy unsubscribe is far
+    better than a spam complaint: one complaint damages your sending
+    reputation roughly a hundred times more than one opt-out.
+    The postal address line was removed on purpose (account owner's call).
+    Note for future editors: CAN-SPAM (US) and several other jurisdictions
+    still expect a physical postal address in every commercial email — if
+    this list ever sends to those regions, put it back rather than assume
+    its absence was an oversight.
     HOW: never touch the {webview_url} and {unsubscribe_url} tokens. Keep
     this block quiet — small and grey — but never hidden.
     ==================================================================== -->
     <mj-section padding="32px 24px 40px">
       <mj-column>
-        <mj-text align="center" font-family="'Poppins', sans-serif" font-size="15px" font-weight="600" padding-bottom="8px">
+        <mj-text align="center" font-family="'Poppins', sans-serif" font-size="15px" font-weight="600" padding-bottom="14px">
           [BRAND NAME]
-        </mj-text>
-        <mj-text align="center" css-class="meta" padding-bottom="18px">
-          [Full postal address — legally required]
         </mj-text>
         <mj-text align="center" css-class="micro" padding-bottom="14px">
           This email was sent to <span class="atwho-inserted" data-fr-verified="true">{contactfield=email}</span>

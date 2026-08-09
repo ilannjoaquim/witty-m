@@ -379,6 +379,7 @@ outils.
 | `list_page_templates` | | Templates de landing page livrés + consigne de chaque emplacement |
 | `create_page_from_template` | ● | Landing page construite à partir d'un template, toujours en mode code source |
 | `create_email` | ● | Email template ou list |
+| `create_email_variant` | ● | Variante de test A/B d'un email existant (vrai mécanisme Mautic, pas un second email indépendant) |
 | `create_landing_page` | ● | Landing page |
 | `send_test_email` | ● | Exemplaire de test, aucun contact touché |
 | `create_form` | ● | Formulaire + champs, avec mapping vers les champs contact |
@@ -450,6 +451,22 @@ pour les salles (`CreateMeetRoomTool`/`EndMeetRoomTool` n'ont pas de `getRequire
 plus), leur imposer `witty_room:categories:*` bloquerait tout le monde en permanence. Une salle
 plugNmeet créée avant ce correctif (ou ouverte directement sur plugNmeet, hors de l'agent) n'a pas
 encore de `WittyRoom` : `update_meet_room` en crée une à la volée au lieu d'échouer.
+
+**Test A/B email (`create_email_variant`)** — le vrai mécanisme Mautic (onglet A/B Test de la
+fiche email, répartition du trafic à l'envoi, détermination automatique du gagnant) repose sur
+`Email::variantParent`/`variantChildren`/`variantSettings`
+(`Mautic\CoreBundle\Entity\VariantEntityTrait`, partagé avec Page) : deux emails créés séparément
+via `create_email` n'ont **aucun lien** entre eux, même en les nommant pareil, l'agent produisait
+donc deux emails indépendants plutôt qu'un test A/B. `create_email_variant` reproduit exactement
+`EmailController::abtestAction()` (bouton "Créer un test A/B" de l'interface) : un nouvel `Email`
+dont `variantParent` pointe vers l'original. Deux règles que Mautic core ne valide qu'à
+l'affichage (`EmailController::indexAction()`, pas au moment de la sauvegarde) sont ici appliquées
+dès la création : la somme des `weight` de toutes les variantes d'un même test ne peut pas dépasser
+100 (le reste revient à l'email d'origine), et toutes les variantes doivent partager le même
+`winnerCriteria`. Donner l'id d'une variante existante en `parent_email_id` résout automatiquement
+la vraie racine du test (même logique que `Email::getVariants()`) — Mautic core refuse même de
+démarrer un nouveau test depuis une variante, ce détail est donc transparent pour l'agent plutôt
+que de lui renvoyer une erreur à contourner lui-même.
 
 `delete_entity`, `manage_tags` (action=delete), `end_meet_room` et `delete_meet_recording`
 exigent `confirmed: true` **même si le mode confirmation global est désactivé** : ce sont les
