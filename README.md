@@ -364,14 +364,16 @@ outil distant.
 
 `list_entities` / `update_entity` / `delete_entity` sont génériques : ils s'appuient sur
 `EntityCatalog`, qui couvre email, page, segment, campaign, form, asset, dynamic_content, stage,
-point, point_trigger, point_group, report, project et message (Channels). Ajouter un type au
-catalogue le rend automatiquement listable/renommable/supprimable sans toucher ces trois outils.
+point, point_trigger, point_group, report, project, message (Channels) et **category**. Ajouter un
+type au catalogue le rend automatiquement listable/renommable/supprimable sans toucher ces trois
+outils.
 
 | Outil | Écriture | Rôle |
 |---|:---:|---|
 | `list_entities` | | Liste n'importe quel type du catalogue (voir ci-dessus) |
-| `update_entity` | ● | Renomme, décrit, (dé)publie un objet existant, tous types du catalogue |
+| `update_entity` | ● | Renomme, décrit, (dé)publie un objet existant, tous types du catalogue ; `category_id` pour les types qui en portent une |
 | `delete_entity` | ● | Suppression définitive, tous types du catalogue |
+| `create_category` | ● | Catégorie Mautic rattachée à un type précis (bundle) : email, page, segment, campaign, form, asset, stage, point, dynamic_content, message, meet_room |
 | `list_email_templates` | | Templates d'email livrés + consigne de rédaction de chaque emplacement |
 | `create_email_from_template` | ● | Email construit à partir d'un template du plugin |
 | `list_page_templates` | | Templates de landing page livrés + consigne de chaque emplacement |
@@ -404,7 +406,8 @@ catalogue le rend automatiquement listable/renommable/supprimable sans toucher c
 | `run_report` | | Exécute un rapport existant, données plafonnées à 50 lignes |
 | `create_message` | ● | Message multi-canal (menu Channels), canaux découverts via `list_channels` |
 | `list_active_meet_rooms` | | Salles plugNmeet actuellement actives |
-| `create_meet_room` | ● | Salle plugNmeet, ouverte indéfiniment jusqu'à `end_meet_room` |
+| `create_meet_room` | ● | Salle plugNmeet, ouverte indéfiniment jusqu'à `end_meet_room` ; catégorie/projets/tags optionnels |
+| `update_meet_room` | ● | Catégorie/projets/tags d'une salle existante — `update_entity` ne couvre pas les salles |
 | `end_meet_room` | ● | Termine une salle active, déconnecte tout le monde |
 | `get_meet_room_participants` | | Qui est connecté à une salle active |
 | `generate_meet_join_link` | ● | Lien de connexion ponctuel (nom libre, pas forcément un contact) |
@@ -420,6 +423,33 @@ catalogue le rend automatiquement listable/renommable/supprimable sans toucher c
 donc pas être déclarée une fois pour toutes sur l'outil, elle est vérifiée **objet par objet**
 via `EntityCatalog::isAllowed()` (`hasEntityAccess`, own/other, ou permission plate pour project
 qui n'a pas de notion de propriétaire).
+
+**Categories** — contrairement aux autres types, la permission d'une catégorie dépend du *bundle*
+auquel elle appartient (`email:categories:create`, `page:categories:create`... plutôt qu'une
+permission `category:*` unique) : c'est le seul type dont `EntityCatalog::isAllowed()` calcule la
+permission dynamiquement à partir de `Category::getBundle()`, et `create_category` vérifie
+`isCategoryCreateAllowed(bundle)` séparément puisqu'aucune entité n'existe encore à ce stade. Une
+catégorie n'appartient qu'à **un seul** bundle (contrainte `Category::$bundle`, colonne
+`NOT NULL`) : `update_entity(category_id=...)` refuse d'assigner une catégorie "email" à un
+segment. Les clés `bundle` Mautic ne correspondent pas toutes au nom du type côté plugin —
+`dynamic_content` → `dynamicContent`, `message` → `messages` (voir `EntityCatalog::CATEGORY_BUNDLE`)
+— et certains types (`point_trigger`, `point_group`, `report`, `project`) n'ont tout simplement
+pas de champ catégorie côté Mautic core.
+
+**Salles plugNmeet (meet_room)** — `Entity/WittyRoom.php` porte bien catégorie/projets/tags, mais
+n'est pas un type `EntityCatalog` (pas de Model Mautic standard derrière, gérée par
+`Service/Videoconference/RoomManager.php`) : `update_entity` ne peut donc pas la cibler, d'où
+`update_meet_room` en tool dédié. `create_meet_room` ne créait jusqu'ici que la salle côté
+plugNmeet — jamais la `WittyRoom` correspondante — donc catégorie/projets/tags n'avaient tout
+simplement aucun endroit où s'attacher, à la création comme après coup ; corrigé en alignant
+`CreateMeetRoomTool` sur `VideoconferenceController::roomsCreateAction()` (même séquence
+`TaxonomyOptionsProvider::resolve*()` + `RoomManager::save()`). `create_category(bundle=meet_room)`
+et `EntityCatalog::isAllowed()`/`isCategoryCreateAllowed()` court-circuitent volontairement la
+vérification de permission pour le bundle `witty_room` : aucune permission Mautic dédiée n'existe
+pour les salles (`CreateMeetRoomTool`/`EndMeetRoomTool` n'ont pas de `getRequiredPermission()` non
+plus), leur imposer `witty_room:categories:*` bloquerait tout le monde en permanence. Une salle
+plugNmeet créée avant ce correctif (ou ouverte directement sur plugNmeet, hors de l'agent) n'a pas
+encore de `WittyRoom` : `update_meet_room` en crée une à la volée au lieu d'échouer.
 
 `delete_entity`, `manage_tags` (action=delete), `end_meet_room` et `delete_meet_recording`
 exigent `confirmed: true` **même si le mode confirmation global est désactivé** : ce sont les

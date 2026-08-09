@@ -6,6 +6,8 @@ namespace MauticPlugin\WittyBundle\Service\Tool;
 
 use Mautic\AssetBundle\Model\AssetModel;
 use Mautic\CampaignBundle\Model\CampaignModel;
+use Mautic\CategoryBundle\Entity\Category;
+use Mautic\CategoryBundle\Model\CategoryModel;
 use Mautic\ChannelBundle\Model\MessageModel;
 use Mautic\CoreBundle\Model\AbstractCommonModel;
 use Mautic\CoreBundle\Security\Permissions\CorePermissions;
@@ -121,6 +123,42 @@ class EntityCatalog
             'other' => 'channel:messages:%sother',
             'url'   => '/s/messages/edit/%d',
         ],
+        // Pas de 'flat'/'own' ici : la permission d'une categorie depend du
+        // bundle auquel elle appartient (email:categories:*, page:categories:*...),
+        // resolue dynamiquement dans isAllowed() / isCategoryCreateAllowed().
+        'category' => [
+            'model' => CategoryModel::class,
+            'url'   => '/s/categories/category/edit/%d',
+        ],
+    ];
+
+    /**
+     * Categorie Mautic (Category::$bundle) associee a chaque type du catalogue
+     * capable d'en porter une (Entity::getCategory()/setCategory()). Les cles
+     * absentes de cette table (point_trigger, point_group, report, project,
+     * category elle-meme...) ne supportent pas les categories dans Mautic core
+     * (pas de champ category sur l'entite, ou pas de picker enregistre cote
+     * bundle) : create_category refuse un bundle absent d'ici, update_entity
+     * refuse un category_id sur un type absent d'ici.
+     *
+     * @var array<string, string>
+     */
+    private const CATEGORY_BUNDLE = [
+        'email'           => 'email',
+        'page'            => 'page',
+        'segment'         => 'segment',
+        'campaign'        => 'campaign',
+        'form'            => 'form',
+        'asset'           => 'asset',
+        'dynamic_content' => 'dynamicContent',
+        'stage'           => 'stage',
+        'point'           => 'point',
+        'message'         => 'messages',
+        // Les salles plugNmeet ne sont pas un type EntityCatalog a part entiere
+        // (pas de Model Mautic standard, gerees par RoomManager) mais portent
+        // bien une categorie (Entity/WittyRoom.php) : create_category doit
+        // pouvoir cibler ce bundle sans que 'meet_room' figure dans MAP/getTypes().
+        'meet_room'       => 'witty_room',
     ];
 
     /** @var array<string, AbstractCommonModel<object>> */
@@ -141,6 +179,7 @@ class EntityCatalog
         ReportModel $reportModel,
         ProjectModel $projectModel,
         MessageModel $messageModel,
+        CategoryModel $categoryModel,
         private CorePermissions $security,
     ) {
         $this->models = [
@@ -158,6 +197,7 @@ class EntityCatalog
             ReportModel::class         => $reportModel,
             ProjectModel::class        => $projectModel,
             MessageModel::class        => $messageModel,
+            CategoryModel::class       => $categoryModel,
         ];
     }
 
@@ -197,6 +237,23 @@ class EntityCatalog
             return false;
         }
 
+        // Cas particulier : la permission d'une categorie depend du bundle
+        // auquel elle appartient (email:categories:*, page:categories:*...),
+        // pas d'un couple flat/own-other statique comme les autres types.
+        if ('category' === $type) {
+            $bundle = $entity instanceof Category && '' !== (string) $entity->getBundle() ? $entity->getBundle() : 'category';
+
+            // Les salles plugNmeet n'ont aucune permission Mautic dediee (voir
+            // CreateMeetRoomTool/EndMeetRoomTool, sans getRequiredPermission()) :
+            // meme convention pour leurs categories, pas de witty_room:categories:*
+            // a verifier (cette permission n'existe d'ailleurs pas cote Mautic).
+            if ('witty_room' === $bundle) {
+                return true;
+            }
+
+            return $this->security->isGranted(sprintf('%s:categories:%s', $bundle, $operation));
+        }
+
         if (isset(self::MAP[$type]['flat'])) {
             return $this->security->isGranted(sprintf(self::MAP[$type]['flat'], $operation));
         }
@@ -208,6 +265,49 @@ class EntityCatalog
             sprintf(self::MAP[$type]['other'], $operation),
             $owner ?? 0,
         );
+    }
+
+    /**
+     * Types du catalogue capables de porter une categorie Mautic (voir
+     * CATEGORY_BUNDLE). Sert d'enum pour create_category(bundle=...).
+     *
+     * @return array<int, string>
+     */
+    public function getCategoryTypes(): array
+    {
+        return array_keys(self::CATEGORY_BUNDLE);
+    }
+
+    /**
+     * Bundle Mautic (Category::$bundle) correspondant a un type du catalogue,
+     * ou null si ce type ne supporte pas les categories.
+     */
+    public function getCategoryBundle(string $type): ?string
+    {
+        return self::CATEGORY_BUNDLE[$type] ?? null;
+    }
+
+    /**
+     * A verifier avant de creer une categorie : contrairement a edit/delete
+     * (isAllowed(), categorie deja existante donc bundle connu), il n'y a pas
+     * encore d'entite Category au moment de la creation, seulement le bundle
+     * cible fourni par l'appelant.
+     */
+    public function isCategoryCreateAllowed(string $type): bool
+    {
+        $bundle = $this->getCategoryBundle($type);
+
+        if (null === $bundle) {
+            return false;
+        }
+
+        // Voir la meme exception dans isAllowed() : pas de permission Mautic
+        // dediee aux salles plugNmeet.
+        if ('witty_room' === $bundle) {
+            return true;
+        }
+
+        return $this->security->isGranted(sprintf('%s:categories:create', $bundle));
     }
 
     /**

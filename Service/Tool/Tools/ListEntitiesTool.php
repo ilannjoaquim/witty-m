@@ -84,6 +84,10 @@ class ListEntitiesTool extends AbstractTool
                 'id'          => method_exists($item, 'getId') ? $item->getId() : null,
                 'name'        => $this->catalog->describe($item),
                 'isPublished' => method_exists($item, 'isPublished') ? $item->isPublished() : null,
+                // Sert a distinguer une categorie "email" d'une categorie
+                // "segment" du meme nom : sans ca, deux entrees list_entities
+                // identiques en apparence porteraient un sens tres different.
+                'bundle'      => 'category' === $entity && method_exists($item, 'getBundle') ? $item->getBundle() : null,
             ], static fn ($value): bool => null !== $value);
         }
 
