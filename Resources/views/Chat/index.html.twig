@@ -64,6 +64,11 @@
     .witty-chip.error, .witty-chip.denied { background: #fdecea; border-color: #f5c6c2; color: #a5261c; }
     #witty-form { display: flex; gap: 8px; margin-top: 12px; }
     #witty-input { flex: 1; resize: none; }
+    /* !important : le CSS de Mautic/Bootstrap stylise les input[type=file] avec
+       une specificite qui l'emporte sur l'attribut HTML `hidden` seul — sans
+       ca, le champ natif du navigateur ("Parcourir…"/"Aucun fichier choisi")
+       reste visible a cote de notre bouton trombone. */
+    #witty-file-input { display: none !important; }
     .witty-attach-btn { display: inline-flex; align-items: center; justify-content: center; width: 36px; flex: 0 0 36px; border: 1px solid #dfe3ea; border-radius: 4px; background: #fff; cursor: pointer; }
     .witty-attach-btn:hover { background: #f6f8fb; }
     #witty-pending-attachments { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
@@ -73,7 +78,7 @@
     .witty-attach-chip.error { background: #fdecea; border-color: #f5c6c2; color: #a5261c; }
     .witty-attach-remove { cursor: pointer; opacity: .6; }
     .witty-attach-remove:hover { opacity: 1; }
-    .witty-msg-attachments { margin: -8px 0 14px; font-size: 12px; }
+    .witty-msg-attachments { margin: 6px 0 14px; font-size: 12px; }
     .witty-msg-attachments a, .witty-msg-attachments span { display: inline-flex; align-items: center; gap: 4px; margin-right: 10px; color: #6b7280; }
     .witty-msg-attachments a { color: inherit; text-decoration: underline; }
     #witty-meta { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 12px; color: #6b7280; margin-bottom: 6px; flex-wrap: wrap; }
