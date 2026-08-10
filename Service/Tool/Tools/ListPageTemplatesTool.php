@@ -49,10 +49,10 @@ class ListPageTemplatesTool extends AbstractTool
 
             foreach ($this->library->all() as $template) {
                 $templates[] = [
-                    'template'     => $template->key,
-                    'name'         => $template->name,
-                    'description'  => $template->description,
-                    'placeholders' => count($template->placeholders),
+                    'template'     => $template->getKey(),
+                    'name'         => $template->getName(),
+                    'description'  => $template->getDescription(),
+                    'placeholders' => count($template->getPlaceholders()),
                 ];
             }
 
@@ -69,11 +69,11 @@ class ListPageTemplatesTool extends AbstractTool
         }
 
         return $this->ok([
-            'template'     => $template->key,
-            'name'         => $template->name,
-            'description'  => $template->description,
-            'goal'         => $template->goal,
-            'rules'        => $template->rules,
+            'template'     => $template->getKey(),
+            'name'         => $template->getName(),
+            'description'  => $template->getDescription(),
+            'goal'         => $template->getGoal(),
+            'rules'        => $template->getRules(),
             'placeholders' => $template->describePlaceholders(),
         ]);
     }

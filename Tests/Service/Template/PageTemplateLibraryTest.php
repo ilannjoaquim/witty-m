@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MauticPlugin\WittyBundle\Tests\Service\Template;
 
+use MauticPlugin\WittyBundle\Service\Template\BuiltInTemplateLoader;
 use MauticPlugin\WittyBundle\Service\Template\PageTemplateLibrary;
 use PHPUnit\Framework\TestCase;
 
@@ -14,24 +15,21 @@ use PHPUnit\Framework\TestCase;
  * n'est donc pas un detail ici, contrairement au template d'email : un
  * echappement HTML applique a une valeur JS afficherait des entites
  * litterales ("&#039;") au lieu d'une apostrophe sur la page reelle.
+ *
+ * Exerce PageTemplateLibrary::render() (statique, aucun etat) sur les
+ * templates encore livres en fichiers via BuiltInTemplateLoader : voir
+ * EmailTemplateLibraryTest pour le raisonnement complet.
  */
 class PageTemplateLibraryTest extends TestCase
 {
-    private PageTemplateLibrary $library;
-
-    protected function setUp(): void
-    {
-        $this->library = new PageTemplateLibrary();
-    }
-
     public function testConfirmationWebinarTemplateIsShippedAndComplete(): void
     {
-        $template = $this->library->get('confirmation-webinar');
+        $template = BuiltInTemplateLoader::loadPage('confirmation-webinar');
 
         $this->assertNotNull($template, 'Le template confirmation-webinar doit etre livre avec le plugin.');
-        $this->assertNotSame('', $template->html);
+        $this->assertNotSame('', $template->getHtml());
 
-        preg_match_all('/\{\{([A-Z0-9_]+)\}\}/', $template->html, $matches);
+        preg_match_all('/\{\{([A-Z0-9_]+)\}\}/', $template->getHtml(), $matches);
 
         $this->assertSame(
             [],
@@ -42,9 +40,9 @@ class PageTemplateLibraryTest extends TestCase
 
     public function testHtmlContextValuesAreEscaped(): void
     {
-        $template = $this->library->get('confirmation-webinar');
+        $template = BuiltInTemplateLoader::loadPage('confirmation-webinar');
 
-        $rendered = $this->library->render($template, ['CONFIRMED_HEADLINE' => '<script>alert(1)</script> & "quoted"']);
+        $rendered = PageTemplateLibrary::render($template, ['CONFIRMED_HEADLINE' => '<script>alert(1)</script> & "quoted"']);
 
         $this->assertStringNotContainsString('<script>alert(1)</script>', $rendered['html']);
         $this->assertStringContainsString('&lt;script&gt;', $rendered['html']);
@@ -52,11 +50,11 @@ class PageTemplateLibraryTest extends TestCase
 
     public function testJsContextValuesAreEscapedAsJavaScriptStringsNotHtml(): void
     {
-        $template = $this->library->get('confirmation-webinar');
+        $template = BuiltInTemplateLoader::loadPage('confirmation-webinar');
 
         // Une apostrophe (legale telle quelle dans une chaine entre guillemets
         // doubles) et un guillemet (qui doit etre echappe) dans un titre reel.
-        $rendered = $this->library->render($template, [
+        $rendered = PageTemplateLibrary::render($template, [
             'EVENT_TITLE' => 'Sam\'s "Launch" Night',
             'JOIN_LINK'   => 'https://example.com/join',
         ]);
@@ -72,9 +70,9 @@ class PageTemplateLibraryTest extends TestCase
 
     public function testJsContextValuesCannotBreakOutOfTheStringLiteral(): void
     {
-        $template = $this->library->get('confirmation-webinar');
+        $template = BuiltInTemplateLoader::loadPage('confirmation-webinar');
 
-        $rendered = $this->library->render($template, [
+        $rendered = PageTemplateLibrary::render($template, [
             'EVENT_TITLE' => 'Evil"; alert(1); //',
         ]);
 
@@ -85,18 +83,18 @@ class PageTemplateLibraryTest extends TestCase
 
     public function testDurationMinutesStaysUnquotedNumericLiteral(): void
     {
-        $template = $this->library->get('confirmation-webinar');
+        $template = BuiltInTemplateLoader::loadPage('confirmation-webinar');
 
-        $rendered = $this->library->render($template, ['DURATION_MINUTES' => '90']);
+        $rendered = PageTemplateLibrary::render($template, ['DURATION_MINUTES' => '90']);
 
         $this->assertStringContainsString('durationMinutes: 90,', $rendered['html']);
     }
 
     public function testHtmlBrContextPreservesLineBreakButBlocksOtherTags(): void
     {
-        $template = $this->library->get('confirmation-webinar');
+        $template = BuiltInTemplateLoader::loadPage('confirmation-webinar');
 
-        $rendered = $this->library->render($template, [
+        $rendered = PageTemplateLibrary::render($template, [
             'CONFIRMED_HEADLINE' => 'Your seat is<br>secured.<img src=x onerror=alert(1)>',
         ]);
 
@@ -109,9 +107,9 @@ class PageTemplateLibraryTest extends TestCase
 
     public function testDefaultsFillGenericLabels(): void
     {
-        $template = $this->library->get('confirmation-webinar');
+        $template = BuiltInTemplateLoader::loadPage('confirmation-webinar');
 
-        $rendered = $this->library->render($template, []);
+        $rendered = PageTemplateLibrary::render($template, []);
 
         $this->assertStringContainsString('>Days<', $rendered['html']);
         $this->assertStringContainsString('Add to Google Calendar', $rendered['html']);
@@ -119,9 +117,9 @@ class PageTemplateLibraryTest extends TestCase
 
     public function testMissingRequiredPlaceholdersAreReported(): void
     {
-        $template = $this->library->get('confirmation-webinar');
+        $template = BuiltInTemplateLoader::loadPage('confirmation-webinar');
 
-        $rendered = $this->library->render($template, ['EVENT_TITLE' => 'Launch Night']);
+        $rendered = PageTemplateLibrary::render($template, ['EVENT_TITLE' => 'Launch Night']);
 
         $this->assertContains('JOIN_LINK', $rendered['missing']);
         $this->assertNotContains('DURATION_MINUTES', $rendered['missing'], 'A une valeur par defaut, ne doit pas etre obligatoire.');
@@ -129,12 +127,12 @@ class PageTemplateLibraryTest extends TestCase
 
     public function testWebinarLandingTemplateIsShippedAndComplete(): void
     {
-        $template = $this->library->get('webinar-landing');
+        $template = BuiltInTemplateLoader::loadPage('webinar-landing');
 
         $this->assertNotNull($template, 'Le template webinar-landing doit etre livre avec le plugin.');
-        $this->assertNotSame('', $template->html);
+        $this->assertNotSame('', $template->getHtml());
 
-        preg_match_all('/\{\{([A-Z0-9_]+)\}\}/', $template->html, $matches);
+        preg_match_all('/\{\{([A-Z0-9_]+)\}\}/', $template->getHtml(), $matches);
 
         $this->assertSame(
             [],
@@ -145,9 +143,9 @@ class PageTemplateLibraryTest extends TestCase
 
     public function testWebinarLandingFormTokenSubstitutesCleanly(): void
     {
-        $template = $this->library->get('webinar-landing');
+        $template = BuiltInTemplateLoader::loadPage('webinar-landing');
 
-        $rendered = $this->library->render($template, ['MAUTIC_FORM_ID' => '42']);
+        $rendered = PageTemplateLibrary::render($template, ['MAUTIC_FORM_ID' => '42']);
 
         $this->assertStringContainsString('{form=42}', $rendered['html']);
     }

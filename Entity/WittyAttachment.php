@@ -18,6 +18,14 @@ use Mautic\UserBundle\Entity\User;
  * Entre upload et envoi, seul `user` rattache l'attachment a quelqu'un — c'est
  * ce qui permet de savoir, cote controleur, qu'un identifiant transmis
  * appartient bien a l'utilisateur connecte avant de l'exploiter.
+ *
+ * `pinned` distingue deux origines qui partagent tout le reste : un upload
+ * fait depuis le trombone du chat (pinned=false, jamais rattache si le
+ * message n'est finalement pas envoye — cf. PruneOrphanAttachmentsCommand,
+ * qui les nettoie apres 24h) et un upload fait depuis la bibliotheque
+ * "Fichiers" (pinned=true, cf. Controller/FileController.php), destine a
+ * rester disponible indefiniment pour plusieurs conversations, jusqu'a
+ * suppression manuelle. Le nettoyage automatique ignore tout ce qui est pinned.
  */
 class WittyAttachment
 {
@@ -47,6 +55,8 @@ class WittyAttachment
     private int $size = 0;
 
     private ?int $assetId = null;
+
+    private bool $pinned = false;
 
     private \DateTimeInterface $dateAdded;
 
@@ -89,6 +99,7 @@ class WittyAttachment
         $builder->addField('kind', 'string');
         $builder->addField('size', 'integer');
         $builder->addNamedField('assetId', 'integer', 'asset_id', true);
+        $builder->addField('pinned', 'boolean');
         $builder->addNamedField('dateAdded', 'datetime', 'date_added');
     }
 
@@ -213,6 +224,18 @@ class WittyAttachment
     public function setAssetId(?int $assetId): self
     {
         $this->assetId = $assetId;
+
+        return $this;
+    }
+
+    public function isPinned(): bool
+    {
+        return $this->pinned;
+    }
+
+    public function setPinned(bool $pinned): self
+    {
+        $this->pinned = $pinned;
 
         return $this;
     }

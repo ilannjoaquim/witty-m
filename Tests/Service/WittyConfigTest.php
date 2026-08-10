@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MauticPlugin\WittyBundle\Tests\Service;
 
+use Mautic\CoreBundle\Helper\PathsHelper;
 use Mautic\IntegrationsBundle\Exception\IntegrationNotFoundException;
 use Mautic\IntegrationsBundle\Helper\IntegrationsHelper;
 use Mautic\IntegrationsBundle\Integration\Interfaces\IntegrationInterface;
@@ -115,12 +116,13 @@ class WittyConfigTest extends TestCase
      */
     private function configWith(?bool $published, array $apiKeys = [], array $featureSettings = []): WittyConfig
     {
-        $helper = $this->createMock(IntegrationsHelper::class);
+        $helper      = $this->createMock(IntegrationsHelper::class);
+        $pathsHelper = $this->createMock(PathsHelper::class);
 
         if (null === $published) {
             $helper->method('getIntegration')->willThrowException(new IntegrationNotFoundException('Witty'));
 
-            return new WittyConfig($helper);
+            return new WittyConfig($helper, $pathsHelper);
         }
 
         $integration = $this->createMock(Integration::class);
@@ -133,6 +135,6 @@ class WittyConfigTest extends TestCase
 
         $helper->method('getIntegration')->willReturn($object);
 
-        return new WittyConfig($helper);
+        return new WittyConfig($helper, $pathsHelper);
     }
 }

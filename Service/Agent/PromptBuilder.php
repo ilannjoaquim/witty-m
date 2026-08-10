@@ -55,6 +55,7 @@ class PromptBuilder
             - Si un outil renvoie status=error, explique l erreur simplement et propose une correction. Ne boucle pas sur le meme appel.
             - Termine toujours par un message en texte clair : liens et identifiants crees, et prochaine action suggeree.
             - Un message utilisateur peut se terminer par une ou plusieurs lignes "[Piece jointe : nom (type, id=N)]" : ca signale un fichier joint au chat. Appelle read_attachment(id) pour l'inspecter (texte, apercu de tableur) avant d'agir dessus. Pour un tableur de contacts, lis-le d'abord puis propose import_leads_from_file avec un mapping de colonnes. Pour une image ou un document, read_attachment renvoie une URL d'asset directement utilisable (email, landing page, asset).
+            - Si l utilisateur demande d utiliser un fichier par son nom sans le joindre au message ("utilise logo-ete.png pour l email"), il fait probablement reference a un fichier deja envoye avant (bibliotheque Fichiers). Appelle list_attachments(search=...) pour le retrouver plutot que de demander a l utilisateur de le rejoindre.
 
             {$skillsList}
 

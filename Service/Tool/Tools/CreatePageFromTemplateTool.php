@@ -127,7 +127,7 @@ class CreatePageFromTemplateTool extends AbstractTool
             }
         }
 
-        $rendered = $this->library->render($template, array_map('strval', $values));
+        $rendered = PageTemplateLibrary::render($template, array_map('strval', $values));
 
         if ([] !== $rendered['missing']) {
             return [
@@ -142,7 +142,7 @@ class CreatePageFromTemplateTool extends AbstractTool
         if ($this->config->requiresConfirmation() && true !== ($arguments['confirmed'] ?? false)) {
             return $this->confirmationRequired([
                 'type'     => 'page',
-                'template' => $template->name,
+                'template' => $template->getName(),
                 'title'    => $title,
                 'alias'    => $alias,
                 'apercu'   => array_intersect_key(
@@ -170,7 +170,7 @@ class CreatePageFromTemplateTool extends AbstractTool
             'id'       => $page->getId(),
             'title'    => $page->getTitle(),
             'alias'    => $page->getAlias(),
-            'template' => $template->key,
+            'template' => $template->getKey(),
             'url'      => '/s/pages/edit/'.$page->getId(),
             'note'     => 'Page creee non publiee, en mode code source (le JavaScript du template reste actif).',
         ]);

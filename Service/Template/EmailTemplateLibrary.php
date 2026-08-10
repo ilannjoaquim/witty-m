@@ -4,60 +4,45 @@ declare(strict_types=1);
 
 namespace MauticPlugin\WittyBundle\Service\Template;
 
+use MauticPlugin\WittyBundle\Entity\WittyTemplate;
+
 /**
- * Bibliotheque des templates d'email livres avec le plugin.
+ * Bibliotheque des templates d'email geres depuis la section Witty > Templates
+ * (cf. TemplateManager, Controller/TemplateController.php). Chaque template
+ * est du HTML final : PHP ne sait pas compiler du MJML (le compilateur
+ * officiel tourne en Node ou dans le navigateur, cf. le builder MJML de
+ * Mautic base sur grapesjs-mjml) et le plugin n'ajoute aucune dependance pour
+ * ca ; un template email s'ecrit donc directement en HTML, comme un template
+ * de landing page.
  *
- * Un template = un dossier dans Templates/Email/ contenant manifest.json,
- * template.html (compile) et, optionnellement, template.mjml (source).
- * Ajouter un template = deposer un dossier, rien a declarer.
- *
- * Le HTML est pre-compile a la construction du plugin : compiler du MJML
- * demande Node, que PHP n'a pas. Le MJML est conserve pour que l'email reste
- * editable dans le builder MJML de Mautic (plugin GrapesJS).
+ * Avant la section Templates, ces templates etaient des dossiers livres avec
+ * le plugin (Templates/Email/) ; ils ont ete repris dans witty_templates par
+ * Migrations/Version_2_8_0.php et restent modifiables/supprimables comme
+ * n'importe quel template cree depuis l'UI.
  */
 class EmailTemplateLibrary
 {
-    /** @var array<string, EmailTemplate>|null */
-    private ?array $templates = null;
-
-    private string $directory;
-
-    public function __construct(?string $directory = null)
+    public function __construct(private TemplateManager $manager)
     {
-        $this->directory = $directory ?? \dirname(__DIR__, 2).'/Templates/Email';
     }
 
     /**
-     * @return array<string, EmailTemplate>
+     * @return array<string, WittyTemplate>
      */
     public function all(): array
     {
-        if (null !== $this->templates) {
-            return $this->templates;
+        $templates = [];
+
+        foreach ($this->manager->listByType(WittyTemplate::TYPE_EMAIL) as $template) {
+            $templates[$template->getKey()] = $template;
         }
 
-        $this->templates = [];
-
-        if (!is_dir($this->directory)) {
-            return $this->templates;
-        }
-
-        foreach ((array) glob($this->directory.'/*', GLOB_ONLYDIR) as $path) {
-            $template = $this->load((string) $path);
-
-            if (null !== $template) {
-                $this->templates[$template->key] = $template;
-            }
-        }
-
-        ksort($this->templates);
-
-        return $this->templates;
+        return $templates;
     }
 
-    public function get(string $key): ?EmailTemplate
+    public function get(string $key): ?WittyTemplate
     {
-        return $this->all()[$key] ?? null;
+        return $this->manager->findByTypeAndKey(WittyTemplate::TYPE_EMAIL, $key);
     }
 
     /**
@@ -67,11 +52,16 @@ class EmailTemplateLibrary
      * HTML. Sans cela, une esperluette ou un chevron dans un titre casserait la
      * mise en page, et une valeur malveillante pourrait injecter du balisage.
      *
+     * Static : ne depend d'aucun etat d'instance, uniquement du template et
+     * des valeurs fournies. Permet aux tests d'exercer la substitution sur un
+     * WittyTemplate construit a la main (cf. BuiltInTemplateLoader) sans base
+     * de donnees.
+     *
      * @param array<string, string> $values
      *
-     * @return array{html: string, mjml: string|null, missing: array<int, string>}
+     * @return array{html: string, missing: array<int, string>}
      */
-    public function render(EmailTemplate $template, array $values): array
+    public static function render(WittyTemplate $template, array $values): array
     {
         $resolved = $template->getDefaults();
 
@@ -84,41 +74,14 @@ class EmailTemplateLibrary
             static fn (string $value): bool => '' !== trim($value),
         ))));
 
-        $keys   = $template->getPlaceholderKeys();
-        $brKeys = $template->getHtmlBrContextKeys();
-
-        return [
-            'html'    => PlaceholderRenderer::render($template->html, $resolved, $keys, [], $brKeys),
-            'mjml'    => null !== $template->mjml ? PlaceholderRenderer::render($template->mjml, $resolved, $keys, [], $brKeys) : null,
-            'missing' => $missing,
-        ];
-    }
-
-    private function load(string $path): ?EmailTemplate
-    {
-        $manifestFile = $path.'/manifest.json';
-        $htmlFile     = $path.'/template.html';
-        $mjmlFile     = $path.'/template.mjml';
-
-        if (!is_file($manifestFile) || !is_file($htmlFile)) {
-            return null;
-        }
-
-        $manifest = json_decode((string) file_get_contents($manifestFile), true);
-
-        if (!is_array($manifest)) {
-            return null;
-        }
-
-        return new EmailTemplate(
-            (string) ($manifest['key'] ?? basename($path)),
-            (string) ($manifest['name'] ?? basename($path)),
-            (string) ($manifest['description'] ?? ''),
-            (string) ($manifest['goal'] ?? ''),
-            array_map('strval', (array) ($manifest['rules'] ?? [])),
-            array_values((array) ($manifest['placeholders'] ?? [])),
-            (string) file_get_contents($htmlFile),
-            is_file($mjmlFile) ? (string) file_get_contents($mjmlFile) : null,
+        $html = PlaceholderRenderer::render(
+            $template->getHtml(),
+            $resolved,
+            $template->getPlaceholderKeys(),
+            [],
+            $template->getHtmlBrContextKeys(),
         );
+
+        return ['html' => $html, 'missing' => $missing];
     }
 }

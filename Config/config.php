@@ -3,9 +3,11 @@
 declare(strict_types=1);
 
 use MauticPlugin\WittyBundle\Controller\AuditController;
+use MauticPlugin\WittyBundle\Controller\FileController;
 use MauticPlugin\WittyBundle\Controller\MeetJoinController;
 use MauticPlugin\WittyBundle\Controller\MeetSlotAvailabilityController;
 use MauticPlugin\WittyBundle\Controller\SkillController;
+use MauticPlugin\WittyBundle\Controller\TemplateController;
 use MauticPlugin\WittyBundle\Controller\VideoconferenceController;
 use MauticPlugin\WittyBundle\Controller\WittyController;
 use MauticPlugin\WittyBundle\Entity\WittyRoom;
@@ -17,7 +19,7 @@ return [
     // Le changement de version declenche Engine::up() sur Migrations/ au prochain
     // mautic:plugins:reload : c'est ce qui cree les tables sur une instance ou le
     // plugin etait deja installe.
-    'version'     => '2.6.0',
+    'version'     => '2.8.0',
     'author'      => 'Witty',
 
     'routes' => [
@@ -90,6 +92,52 @@ return [
             'witty_skills_delete' => [
                 'path'       => '/witty/skills/delete',
                 'controller' => SkillController::class.'::deleteAction',
+                'method'     => 'POST',
+            ],
+
+            'witty_templates' => [
+                'path'       => '/witty/templates',
+                'controller' => TemplateController::class.'::indexAction',
+            ],
+            'witty_templates_data' => [
+                'path'       => '/witty/templates/data',
+                'controller' => TemplateController::class.'::dataAction',
+                'method'     => 'GET',
+            ],
+            'witty_templates_save' => [
+                'path'       => '/witty/templates/save',
+                'controller' => TemplateController::class.'::saveAction',
+                'method'     => 'POST',
+            ],
+            'witty_templates_delete' => [
+                'path'       => '/witty/templates/delete',
+                'controller' => TemplateController::class.'::deleteAction',
+                'method'     => 'POST',
+            ],
+            'witty_templates_preview' => [
+                'path'         => '/witty/templates/{id}/preview',
+                'controller'   => TemplateController::class.'::previewAction',
+                'method'       => 'GET',
+                'requirements' => ['id' => '\d+'],
+            ],
+
+            'witty_files' => [
+                'path'       => '/witty/files',
+                'controller' => FileController::class.'::indexAction',
+            ],
+            'witty_files_data' => [
+                'path'       => '/witty/files/data',
+                'controller' => FileController::class.'::dataAction',
+                'method'     => 'GET',
+            ],
+            'witty_files_upload' => [
+                'path'       => '/witty/files/upload',
+                'controller' => FileController::class.'::uploadAction',
+                'method'     => 'POST',
+            ],
+            'witty_files_delete' => [
+                'path'       => '/witty/files/delete',
+                'controller' => FileController::class.'::deleteAction',
                 'method'     => 'POST',
             ],
 
@@ -208,6 +256,16 @@ return [
                 'route'     => 'witty_skills',
                 'parent'    => 'mautic.witty.menu.root',
                 'priority'  => 20,
+            ],
+            'mautic.witty.menu.templates' => [
+                'route'     => 'witty_templates',
+                'parent'    => 'mautic.witty.menu.root',
+                'priority'  => 18,
+            ],
+            'mautic.witty.menu.files' => [
+                'route'     => 'witty_files',
+                'parent'    => 'mautic.witty.menu.root',
+                'priority'  => 15,
             ],
             // Entre Channels (40, cf. CoreBundle\Config\config.php) et Points (30,
             // cf. PointBundle\Config\config.php).

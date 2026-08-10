@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MauticPlugin\WittyBundle\Service\Tool\Tools;
 
-use Doctrine\ORM\EntityManagerInterface;
 use Mautic\EmailBundle\Entity\Email;
 use Mautic\EmailBundle\Model\EmailModel;
 use Mautic\LeadBundle\Entity\LeadList;
@@ -12,10 +11,9 @@ use Mautic\LeadBundle\Model\ListModel;
 use MauticPlugin\WittyBundle\Service\Template\EmailTemplateLibrary;
 use MauticPlugin\WittyBundle\Service\Tool\AbstractTool;
 use MauticPlugin\WittyBundle\Service\WittyConfig;
-use Psr\Log\LoggerInterface;
 
 /**
- * Cree un email a partir d'un template livre avec le plugin.
+ * Cree un email a partir d'un template gere depuis la section Witty > Templates.
  *
  * La substitution est faite ici et non par le modele : lui faire recracher
  * 1 200 lignes de HTML compile reviendrait a lui demander de recopier un
@@ -31,9 +29,7 @@ class CreateEmailFromTemplateTool extends AbstractTool
         private EmailTemplateLibrary $library,
         private EmailModel $emailModel,
         private ListModel $listModel,
-        private EntityManagerInterface $entityManager,
         private WittyConfig $config,
-        private LoggerInterface $logger,
     ) {
     }
 
@@ -134,7 +130,7 @@ class CreateEmailFromTemplateTool extends AbstractTool
             }
         }
 
-        $rendered = $this->library->render($template, array_map('strval', $values));
+        $rendered = EmailTemplateLibrary::render($template, array_map('strval', $values));
 
         if ([] !== $rendered['missing']) {
             return [
@@ -147,7 +143,7 @@ class CreateEmailFromTemplateTool extends AbstractTool
         if ($this->config->requiresConfirmation() && true !== ($arguments['confirmed'] ?? false)) {
             return $this->confirmationRequired([
                 'type'     => 'email',
-                'template' => $template->name,
+                'template' => $template->getName(),
                 'name'     => $name,
                 'subject'  => $subject,
                 'apercu'   => array_intersect_key(
@@ -188,50 +184,14 @@ class CreateEmailFromTemplateTool extends AbstractTool
 
         $this->emailModel->saveEntity($email);
 
-        $editableInMjml = $this->storeMjmlSource($email, $rendered['mjml']);
-
         return $this->ok([
             'id'       => $email->getId(),
             'name'     => $email->getName(),
-            'template' => $template->key,
+            'template' => $template->getKey(),
             'type'     => $type,
             'segments' => $attached,
             'url'      => '/s/emails/edit/'.$email->getId(),
-            'mjml_editable' => $editableInMjml,
-            'note'     => $editableInMjml
-                ? 'Email cree non publie. Le source MJML est enregistre : il reste modifiable dans le builder MJML.'
-                : 'Email cree non publie. Le plugin GrapesJS n etant pas installe, seul le HTML est enregistre.',
+            'note'     => 'Email cree non publie, en HTML brut (pas de source MJML : le template est gere en HTML, cf. section Witty > Templates).',
         ]);
-    }
-
-    /**
-     * Enregistre le MJML pour que l'email reste editable dans le builder.
-     *
-     * Dependance optionnelle : le plugin GrapesJS n'est pas garanti present, on
-     * ne le declare donc pas en dur et on echoue en silence si l'ecriture rate,
-     * le HTML etant deja enregistre.
-     */
-    private function storeMjmlSource(Email $email, ?string $mjml): bool
-    {
-        $entityClass = 'MauticPlugin\GrapesJsBuilderBundle\Entity\GrapesJsBuilder';
-
-        if (null === $mjml || !class_exists($entityClass)) {
-            return false;
-        }
-
-        try {
-            $entity = new $entityClass();
-            $entity->setEmail($email);
-            $entity->setCustomMjml($mjml);
-
-            $this->entityManager->persist($entity);
-            $this->entityManager->flush();
-
-            return true;
-        } catch (\Throwable $e) {
-            $this->logger->warning('Witty : MJML non enregistre', ['exception' => $e, 'email' => $email->getId()]);
-
-            return false;
-        }
     }
 }

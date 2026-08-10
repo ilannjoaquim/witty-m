@@ -13,7 +13,15 @@ use Symfony\Component\HttpFoundation\File\UploadedFile;
  *
  * - favicon.ico : chemin fixe attendu par AssetsHelper::getOverridableUrl(),
  *   deja appele par head.html.twig (core) — un fichier present a cet endroit
- *   suffit, aucun autre changement necessaire cote Mautic.
+ *   suffit pour les pages admin (prefixe /s/), aucun autre changement cote
+ *   Mautic necessaire pour elles. Insuffisant pour tout le reste (landing
+ *   pages, apercu web d'un email, page de desabonnement...) : ces gabarits
+ *   n'incluent jamais head.html.twig et ne posent donc aucun <link
+ *   rel="icon"> explicite. Le navigateur retombe alors sur la requete
+ *   implicite /favicon.ico a la racine du site, servie par le fichier
+ *   statique du document root de Mautic (PathsHelper::getRootPath()) —
+ *   c'est ce fichier qu'on ecrase egalement, sans quoi tout ce qui est
+ *   public affiche le favicon Mautic par defaut quel que soit l'import.
  * - witty_custom_logo.{ext} : pas de mecanisme d'override natif pour le logo
  *   (le gabarit core l'inline en SVG brut via `source()`), pris en charge par
  *   un remplacement visuel en CSS, cf. EventListener/BrandingSubscriber.php.
@@ -55,6 +63,12 @@ class BrandingAssetManager
      * determinent le vrai type au contenu, pas a l'extension, un PNG servi
      * sous ce nom s'affiche correctement dans l'immense majorite des cas.
      *
+     * Ecrit a deux endroits : media/images/ (pages admin, via
+     * getOverridableUrl()) et le document root de Mautic (tout le reste,
+     * public — voir la docblock de la classe). `move()` deplace le fichier
+     * uploade, donc une seule des deux copies peut se faire par simple
+     * deplacement ; l'autre recopie le fichier deja en place sur disque.
+     *
      * @return bool false si extension refusee, rien enregistre.
      */
     public function storeFavicon(UploadedFile $file): bool
@@ -64,6 +78,9 @@ class BrandingAssetManager
         }
 
         $file->move($this->imagesDir(), self::FAVICON_FILENAME);
+
+        $rootFavicon = rtrim($this->pathsHelper->getRootPath(), '/').'/'.self::FAVICON_FILENAME;
+        copy($this->imagesDir().'/'.self::FAVICON_FILENAME, $rootFavicon);
 
         return true;
     }

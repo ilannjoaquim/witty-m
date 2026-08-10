@@ -69,9 +69,15 @@ class AttachmentManager
     }
 
     /**
+     * @param bool $pinned true pour un upload fait depuis la bibliotheque
+     *                     "Fichiers" (Controller/FileController.php) : ignore
+     *                     du nettoyage automatique des uploads orphelins, cf.
+     *                     WittyAttachment::$pinned. false (defaut) pour un
+     *                     upload depuis le trombone du chat.
+     *
      * @throws AttachmentInvalidException extension refusee ou fichier trop lourd
      */
-    public function upload(UploadedFile $file, ?WittyConversation $conversation = null): WittyAttachment
+    public function upload(UploadedFile $file, ?WittyConversation $conversation = null, bool $pinned = false): WittyAttachment
     {
         $user      = $this->requireUser();
         $extension = strtolower($file->getClientOriginalExtension() ?: (string) $file->guessExtension());
@@ -84,6 +90,7 @@ class AttachmentManager
         $attachment = new WittyAttachment();
         $attachment->setUser($user)
             ->setConversation($conversation)
+            ->setPinned($pinned)
             ->setOriginalFilename($file->getClientOriginalName())
             ->setMimeType((string) ($file->getMimeType() ?: 'application/octet-stream'))
             ->setExtension($extension)
@@ -121,6 +128,20 @@ class AttachmentManager
         }
 
         return $attachment;
+    }
+
+    /**
+     * Bibliotheque "Fichiers" de l'utilisateur courant (page Files et outil
+     * list_attachments) : tout ce qu'il a deja envoye a l'agent, rattache a
+     * une conversation ou non.
+     *
+     * @return WittyAttachment[]
+     */
+    public function listForUser(?string $search = null, int $limit = 100): array
+    {
+        $user = $this->requireUser();
+
+        return $this->repository()->findAllForUser((int) $user->getId(), $search, $limit);
     }
 
     /**
@@ -183,38 +204,64 @@ class AttachmentManager
     }
 
     /**
-     * Supprime un upload jamais rattache a une conversation (fichier joint
-     * puis jamais envoye). Autonome (persist + flush inclus) : ce n'est pas
-     * appele depuis le tour de l'agent, seulement depuis la commande de
-     * nettoyage periodique (voir Command/PruneOrphanAttachmentsCommand).
+     * Suppression manuelle d'une piece jointe (page Fichiers) : fichier ou
+     * Asset physique, puis la ligne en base. Autonome (flush inclus), a la
+     * difference de attachToConversation() — ce n'est jamais appele au milieu
+     * du tour de l'agent.
+     */
+    public function delete(WittyAttachment $attachment): void
+    {
+        $this->deleteFile($attachment);
+        $this->entityManager->remove($attachment);
+        $this->entityManager->flush();
+    }
+
+    /**
+     * Supprime les uploads jamais rattaches a une conversation (fichier joint
+     * puis jamais envoye) et non "pinned" (cf. WittyAttachment::$pinned).
+     * Autonome (flush inclus) : ce n'est pas appele depuis le tour de
+     * l'agent, seulement depuis la commande de nettoyage periodique (voir
+     * Command/PruneOrphanAttachmentsCommand).
      */
     public function pruneOrphans(\DateTimeInterface $before): int
     {
         $orphans = $this->repository()->findOrphans($before);
 
         foreach ($orphans as $attachment) {
-            if (null !== $attachment->getAssetId()) {
-                $asset = $this->assetModel->getEntity($attachment->getAssetId());
-
-                if ($asset instanceof Asset) {
-                    // AssetSubscriber (core) supprime le fichier physique sur
-                    // cet evenement, pas besoin de le faire nous-memes.
-                    $this->assetModel->deleteEntity($asset);
-                }
-            } else {
-                $path = $this->absolutePath($attachment);
-
-                if (is_file($path)) {
-                    @unlink($path);
-                }
-            }
-
+            $this->deleteFile($attachment);
             $this->entityManager->remove($attachment);
         }
 
         $this->entityManager->flush();
 
         return count($orphans);
+    }
+
+    /**
+     * Supprime le fichier physique ou l'Asset Mautic d'une piece jointe, sans
+     * toucher a la ligne en base ni flusher (fait par l'appelant). Partage
+     * entre delete() (une seule piece jointe) et pruneOrphans() (plusieurs,
+     * un seul flush pour tout le lot).
+     */
+    private function deleteFile(WittyAttachment $attachment): void
+    {
+        if (null !== $attachment->getAssetId()) {
+            $asset = $this->assetModel->getEntity($attachment->getAssetId());
+
+            if ($asset instanceof Asset) {
+                // AssetSubscriber (core) supprime le fichier physique sur cet
+                // evenement, pas besoin de le faire nous-memes.
+                $this->assetModel->deleteEntity($asset);
+            }
+
+            return;
+        }
+
+        $path = $this->absolutePath($attachment);
+
+        if (is_file($path)) {
+            @unlink($path);
+        }
     }
 
     /**

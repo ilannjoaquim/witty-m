@@ -1,0 +1,377 @@
+{% extends '@MauticCore/Default/content.html.twig' %}
+
+{% block mauticContent 'wittyTemplates' %}
+
+{% block headerTitle %}{{ 'mautic.witty.template.header'|trans }}{% endblock %}
+
+{% block actions %}
+    {% include '@MauticCore/Helper/button.html.twig' with {
+        buttons: [
+            {
+                label: 'mautic.witty.template.create',
+                icon: 'ri-add-line',
+                variant: 'primary',
+                attributes: { id: 'witty-template-create-btn', type: 'button' }
+            }
+        ]
+    } %}
+{% endblock %}
+
+{% block content %}
+<style>
+    /* Complements des classes Mautic reelles (btn, table, page-header...) : pas
+       de reimplementation, juste ce que Mautic ne fournit pas deja. */
+    #witty-template-app .panel { margin-bottom: 0; }
+    .witty-template-description { color: var(--text-secondary, #6b7280); font-size: 13px; max-width: 380px; }
+    .witty-template-type-badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; text-transform: uppercase; }
+    .witty-template-type-badge.email { background: #eef2ff; color: #4338ca; }
+    .witty-template-type-badge.page { background: #ecfdf5; color: #047857; }
+    .witty-template-tabs { display: flex; gap: 4px; padding: 12px 15px 0; }
+    .witty-template-tabs button { border: none; background: none; padding: 8px 14px; font-size: 13px; font-weight: 600; color: var(--text-secondary, #6b7280); border-bottom: 2px solid transparent; cursor: pointer; }
+    .witty-template-tabs button.active { color: var(--text-primary, #1f2937); border-bottom-color: var(--brand-primary, #4e5e9e); }
+    .witty-template-modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 1050; align-items: flex-start; justify-content: center; padding: 40px 16px; overflow-y: auto; }
+    .witty-template-modal-overlay.open { display: flex; }
+    .witty-template-modal { background: #fff; border-radius: 4px; width: 100%; max-width: 860px; box-shadow: 0 2px 18px rgba(0,0,0,.2); }
+    .witty-template-modal-body { padding: 20px 24px; }
+    .witty-template-modal-body h2 { margin: 0 0 18px; font-size: 20px; font-weight: 400; }
+    .witty-template-modal .form-group { margin-bottom: 16px; }
+    .witty-template-modal label { display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px; }
+    .witty-template-modal textarea.form-control { font-family: monospace; font-size: 12px; }
+    .witty-template-modal textarea.witty-template-code { min-height: 320px; }
+    .witty-template-modal textarea.witty-template-rules,
+    .witty-template-modal textarea.witty-template-placeholders { min-height: 100px; }
+    .witty-template-modal .form-row { display: flex; gap: 16px; }
+    .witty-template-modal .form-row .form-group { flex: 1; }
+    .witty-template-modal-footer { display: flex; }
+    .witty-template-modal-footer .btn { flex: 1; border-radius: 0; justify-content: center; }
+    .witty-template-modal-footer .btn:first-child { border-bottom-left-radius: 4px; }
+    .witty-template-modal-footer .btn:last-child { border-bottom-right-radius: 4px; }
+    .witty-template-preview-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 1060; align-items: center; justify-content: center; padding: 30px; }
+    .witty-template-preview-overlay.open { display: flex; }
+    .witty-template-preview-frame-wrap { background: #fff; width: 100%; height: 100%; max-width: 1100px; border-radius: 4px; overflow: hidden; display: flex; flex-direction: column; }
+    .witty-template-preview-frame-wrap .witty-template-preview-header { display: flex; justify-content: space-between; align-items: center; padding: 8px 14px; border-bottom: 1px solid #e5e7eb; }
+    .witty-template-preview-frame-wrap iframe { border: none; flex: 1; width: 100%; }
+</style>
+
+<div id="witty-template-app"
+     data-data-endpoint="{{ path('witty_templates_data') }}"
+     data-save-endpoint="{{ path('witty_templates_save') }}"
+     data-delete-endpoint="{{ path('witty_templates_delete') }}"
+     data-preview-endpoint="{{ path('witty_templates_preview', { id: 0 }) }}">
+
+    <p class="text-muted">{{ 'mautic.witty.template.intro'|trans }}</p>
+
+    <div id="witty-template-list-wrapper" class="panel panel-default">
+        <div class="witty-template-tabs">
+            <button type="button" data-filter="" class="active">{{ 'mautic.witty.template.filter_all'|trans }}</button>
+            <button type="button" data-filter="email">{{ 'mautic.witty.template.type_email'|trans }}</button>
+            <button type="button" data-filter="page">{{ 'mautic.witty.template.type_page'|trans }}</button>
+        </div>
+        <div class="panel-body pb-0">
+            <div class="input-group d-flex">
+                <span class="input-group-addon"><i class="ri-search-line" aria-hidden="true"></i></span>
+                <input type="search" id="witty-template-filter" class="form-control search" placeholder="{{ 'mautic.witty.template.filter'|trans }}" autocomplete="off">
+            </div>
+        </div>
+        <div id="witty-template-list"></div>
+        <div id="witty-template-empty" class="mt-80 mb-80 col-md-offset-2 col-lg-offset-3 col-md-8 col-lg-6" style="display:none;">
+            {{ include('@MauticCore/Components/content-block.html.twig', {
+                heading: 'mautic.witty.template.empty_heading',
+                copy: 'mautic.witty.template.empty',
+            }) }}
+        </div>
+    </div>
+
+    <div id="witty-template-modal-overlay" class="witty-template-modal-overlay">
+        <div class="witty-template-modal" id="witty-template-modal"></div>
+    </div>
+
+    <div id="witty-template-preview-overlay" class="witty-template-preview-overlay">
+        <div class="witty-template-preview-frame-wrap">
+            <div class="witty-template-preview-header">
+                <strong>{{ 'mautic.witty.template.preview'|trans }}</strong>
+                <button type="button" class="btn btn-ghost btn-nospin" id="witty-template-preview-close"><i class="ri-close-line"></i></button>
+            </div>
+            <iframe id="witty-template-preview-frame" sandbox="allow-same-origin allow-scripts"></iframe>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    var app = document.getElementById('witty-template-app');
+    if (!app || app.dataset.wittyReady === '1') { return; }
+    app.dataset.wittyReady = '1';
+
+    var list          = document.getElementById('witty-template-list');
+    var emptyState    = document.getElementById('witty-template-empty');
+    var overlay       = document.getElementById('witty-template-modal-overlay');
+    var modal         = document.getElementById('witty-template-modal');
+    var filterInput   = document.getElementById('witty-template-filter');
+    var previewOverlay = document.getElementById('witty-template-preview-overlay');
+    var previewFrame   = document.getElementById('witty-template-preview-frame');
+    var allTemplates  = [];
+    var filterTerm    = '';
+    var typeFilter    = '';
+
+    function headersForm() {
+        return { 'X-Requested-With': 'XMLHttpRequest', 'X-CSRF-Token': window.mauticAjaxCsrf || '' };
+    }
+
+    function toForm(data) {
+        var params = new URLSearchParams();
+        Object.keys(data).forEach(function (key) { params.append(key, data[key]); });
+        return params;
+    }
+
+    function openModal(html) {
+        modal.innerHTML = html;
+        overlay.classList.add('open');
+    }
+
+    function closeModal() {
+        overlay.classList.remove('open');
+        modal.innerHTML = '';
+    }
+
+    overlay.addEventListener('click', function (event) {
+        if (event.target === overlay) { closeModal(); }
+    });
+
+    document.getElementById('witty-template-preview-close').addEventListener('click', function () {
+        previewOverlay.classList.remove('open');
+        previewFrame.src = 'about:blank';
+    });
+    previewOverlay.addEventListener('click', function (event) {
+        if (event.target === previewOverlay) {
+            previewOverlay.classList.remove('open');
+            previewFrame.src = 'about:blank';
+        }
+    });
+
+    function openPreview(id) {
+        previewFrame.src = app.dataset.previewEndpoint.replace('/0/preview', '/' + id + '/preview');
+        previewOverlay.classList.add('open');
+    }
+
+    function escapeHtml(value) {
+        var div = document.createElement('div');
+        div.textContent = value == null ? '' : String(value);
+        return div.innerHTML;
+    }
+
+    function formatDate(value) {
+        if (!value) { return '—'; }
+        var date = new Date(value);
+        return isNaN(date.getTime()) ? String(value) : date.toLocaleString();
+    }
+
+    var templatesById = {};
+
+    function loadTemplates() {
+        fetch(app.dataset.dataEndpoint, { headers: headersForm() })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                if (!data.status) { renderError(data.msg); return; }
+                allTemplates = data.templates || [];
+                renderTemplates();
+            })
+            .catch(function (err) { renderError(err.message); });
+    }
+
+    function renderError(msg) {
+        emptyState.style.display = 'none';
+        list.innerHTML = '<div class="alert alert-danger m-md">' + escapeHtml(msg) + '</div>';
+    }
+
+    function renderTemplates() {
+        templatesById = {};
+        allTemplates.forEach(function (template) { templatesById[template.id] = template; });
+
+        var templates = allTemplates.filter(function (template) {
+            if (typeFilter && template.type !== typeFilter) { return false; }
+            if (!filterTerm) { return true; }
+            return (template.name || '').toLowerCase().indexOf(filterTerm) !== -1 ||
+                (template.description || '').toLowerCase().indexOf(filterTerm) !== -1 ||
+                (template.key || '').toLowerCase().indexOf(filterTerm) !== -1;
+        });
+
+        if (!allTemplates.length) {
+            list.innerHTML = '';
+            emptyState.style.display = '';
+            return;
+        }
+
+        emptyState.style.display = 'none';
+
+        if (!templates.length) {
+            list.innerHTML = '<p class="text-muted pa-md">{{ 'mautic.witty.template.filter_empty'|trans|e('js') }}</p>';
+            return;
+        }
+
+        var rows = templates.map(function (template) {
+            var typeLabel = 'page' === template.type
+                ? '{{ 'mautic.witty.template.type_page'|trans|e('js') }}'
+                : '{{ 'mautic.witty.template.type_email'|trans|e('js') }}';
+
+            return '' +
+                '<tr>' +
+                    '<td><a href="#" data-action="edit" data-id="' + template.id + '">' + escapeHtml(template.name) + '</a></td>' +
+                    '<td><span class="witty-template-type-badge ' + template.type + '">' + typeLabel + '</span></td>' +
+                    '<td><code>' + escapeHtml(template.key) + '</code></td>' +
+                    '<td class="witty-template-description">' + escapeHtml(template.description) + '</td>' +
+                    '<td>' + escapeHtml(template.createdBy || '—') + '</td>' +
+                    '<td>' + formatDate(template.dateModified) + '</td>' +
+                    '<td class="text-right">' +
+                        '<div class="btn-group">' +
+                            '<button type="button" class="btn btn-ghost btn-nospin" size="sm" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">' +
+                                '<i class="ri-more-2-line" aria-hidden="true"></i>' +
+                            '</button>' +
+                            '<ul class="dropdown-menu dropdown-menu-right" role="menu">' +
+                                '<li><a href="#" data-action="preview" data-id="' + template.id + '"><i class="ri-eye-line"></i> {{ 'mautic.witty.template.preview'|trans|e('js') }}</a></li>' +
+                                '<li><a href="#" data-action="edit" data-id="' + template.id + '"><i class="ri-edit-line"></i> {{ 'mautic.core.form.edit'|trans|e('js') }}</a></li>' +
+                                '<li><a href="#" data-action="delete" data-id="' + template.id + '"><i class="ri-delete-bin-line"></i> {{ 'mautic.core.form.delete'|trans|e('js') }}</a></li>' +
+                            '</ul>' +
+                        '</div>' +
+                    '</td>' +
+                '</tr>';
+        }).join('');
+
+        list.innerHTML =
+            '<div class="table-responsive">' +
+                '<table class="table table-hover witty-template-table">' +
+                    '<thead><tr>' +
+                        '<th>{{ 'mautic.witty.template.name'|trans|e('js') }}</th>' +
+                        '<th>{{ 'mautic.witty.template.type'|trans|e('js') }}</th>' +
+                        '<th>{{ 'mautic.witty.template.key'|trans|e('js') }}</th>' +
+                        '<th>{{ 'mautic.witty.template.description'|trans|e('js') }}</th>' +
+                        '<th>{{ 'mautic.core.createdby'|trans|e('js') }}</th>' +
+                        '<th>{{ 'mautic.core.date.modified'|trans|default('Modified')|e('js') }}</th>' +
+                        '<th></th>' +
+                    '</tr></thead>' +
+                    '<tbody>' + rows + '</tbody>' +
+                '</table>' +
+            '</div>';
+
+        list.querySelectorAll('[data-action="edit"]').forEach(function (el) {
+            el.addEventListener('click', function (event) { event.preventDefault(); openForm(templatesById[el.dataset.id]); });
+        });
+        list.querySelectorAll('[data-action="delete"]').forEach(function (el) {
+            el.addEventListener('click', function (event) { event.preventDefault(); deleteTemplate(el.dataset.id); });
+        });
+        list.querySelectorAll('[data-action="preview"]').forEach(function (el) {
+            el.addEventListener('click', function (event) { event.preventDefault(); openPreview(el.dataset.id); });
+        });
+    }
+
+    function openForm(template) {
+        template = template || { id: '', type: 'email', key: '', name: '', description: '', goal: '', rules: [], placeholders: [], html: '' };
+
+        var rulesText = (template.rules || []).join('\n');
+        var placeholdersText = (template.placeholders && template.placeholders.length) ? JSON.stringify(template.placeholders, null, 2) : '';
+
+        openModal(
+            '<div class="witty-template-modal-body">' +
+                '<h2>' + (template.id ? '{{ 'mautic.witty.template.edit'|trans|e('js') }}' : '{{ 'mautic.witty.template.create'|trans|e('js') }}') + '</h2>' +
+                '<div class="form-row">' +
+                    '<div class="form-group"><label>{{ 'mautic.witty.template.name'|trans|e('js') }}</label>' +
+                        '<input type="text" id="witty-template-name" class="form-control" value="' + escapeHtml(template.name) + '"></div>' +
+                    '<div class="form-group"><label>{{ 'mautic.witty.template.type'|trans|e('js') }}</label>' +
+                        '<select id="witty-template-type" class="form-control">' +
+                            '<option value="email"' + ('email' === template.type ? ' selected' : '') + '>{{ 'mautic.witty.template.type_email'|trans|e('js') }}</option>' +
+                            '<option value="page"' + ('page' === template.type ? ' selected' : '') + '>{{ 'mautic.witty.template.type_page'|trans|e('js') }}</option>' +
+                        '</select></div>' +
+                    '<div class="form-group"><label>{{ 'mautic.witty.template.key'|trans|e('js') }}</label>' +
+                        '<input type="text" id="witty-template-key" class="form-control" value="' + escapeHtml(template.key) + '" placeholder="{{ 'mautic.witty.template.key_placeholder'|trans|e('js') }}"></div>' +
+                '</div>' +
+                '<div class="form-group"><label>{{ 'mautic.witty.template.description'|trans|e('js') }}</label>' +
+                    '<input type="text" id="witty-template-description" class="form-control" value="' + escapeHtml(template.description) + '" placeholder="{{ 'mautic.witty.template.description_placeholder'|trans|e('js') }}"></div>' +
+                '<div class="form-group"><label>{{ 'mautic.witty.template.goal'|trans|e('js') }}</label>' +
+                    '<input type="text" id="witty-template-goal" class="form-control" value="' + escapeHtml(template.goal) + '" placeholder="{{ 'mautic.witty.template.goal_placeholder'|trans|e('js') }}"></div>' +
+                '<div class="form-group"><label>{{ 'mautic.witty.template.rules'|trans|e('js') }}</label>' +
+                    '<textarea id="witty-template-rules" class="form-control witty-template-rules" placeholder="{{ 'mautic.witty.template.rules_placeholder'|trans|e('js') }}">' + escapeHtml(rulesText) + '</textarea></div>' +
+                '<div class="form-group"><label>{{ 'mautic.witty.template.placeholders'|trans|e('js') }}</label>' +
+                    '<textarea id="witty-template-placeholders" class="form-control witty-template-placeholders" placeholder="{{ 'mautic.witty.template.placeholders_placeholder'|trans|e('js') }}">' + escapeHtml(placeholdersText) + '</textarea></div>' +
+                '<div class="form-group">' +
+                    '<label>{{ 'mautic.witty.template.code'|trans|e('js') }}</label>' +
+                    '<textarea id="witty-template-html" class="form-control witty-template-code" spellcheck="false">' + escapeHtml(template.html) + '</textarea>' +
+                '</div>' +
+            '</div>' +
+            '<div class="witty-template-modal-footer">' +
+                '<button class="btn btn-primary" id="witty-template-submit" type="button"><i class="ri-check-line"></i> <span>{{ 'mautic.core.form.save'|trans|e('js') }}</span></button>' +
+                '<button class="btn btn-secondary" id="witty-template-cancel" type="button"><i class="ri-close-line"></i> <span>{{ 'mautic.core.form.cancel'|trans|e('js') }}</span></button>' +
+            '</div>'
+        );
+
+        document.getElementById('witty-template-cancel').addEventListener('click', closeModal);
+
+        document.getElementById('witty-template-submit').addEventListener('click', function () {
+            var name = document.getElementById('witty-template-name').value.trim();
+            var html = document.getElementById('witty-template-html').value;
+            var placeholders = document.getElementById('witty-template-placeholders').value.trim();
+
+            if (!name) { window.alert('{{ 'mautic.witty.template.name'|trans|e('js') }}'); return; }
+            if (!html.trim()) { window.alert('{{ 'mautic.witty.template.code'|trans|e('js') }}'); return; }
+
+            if (placeholders) {
+                try { JSON.parse(placeholders); }
+                catch (e) { window.alert('{{ 'mautic.witty.template.placeholders_invalid'|trans|e('js') }}'); return; }
+            }
+
+            fetch(app.dataset.saveEndpoint, {
+                method: 'POST',
+                headers: headersForm(),
+                body: toForm({
+                    id: template.id || '',
+                    type: document.getElementById('witty-template-type').value,
+                    key: document.getElementById('witty-template-key').value.trim(),
+                    name: name,
+                    description: document.getElementById('witty-template-description').value.trim(),
+                    goal: document.getElementById('witty-template-goal').value.trim(),
+                    rules: document.getElementById('witty-template-rules').value,
+                    placeholders: placeholders,
+                    html: html
+                })
+            })
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                    if (!data.status) { window.alert(data.msg || 'Error'); return; }
+                    closeModal();
+                    loadTemplates();
+                })
+                .catch(function (err) { window.alert(err.message); });
+        });
+    }
+
+    function deleteTemplate(id) {
+        var template = templatesById[id];
+        if (!window.confirm('{{ 'mautic.witty.template.delete_confirm'|trans|e('js') }} (' + (template ? template.name : id) + ')')) { return; }
+
+        fetch(app.dataset.deleteEndpoint, { method: 'POST', headers: headersForm(), body: toForm({ id: id }) })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                if (!data.status) { window.alert(data.msg || 'Error'); return; }
+                loadTemplates();
+            });
+    }
+
+    document.getElementById('witty-template-create-btn').addEventListener('click', function () { openForm(null); });
+
+    document.querySelectorAll('.witty-template-tabs button').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            document.querySelectorAll('.witty-template-tabs button').forEach(function (b) { b.classList.remove('active'); });
+            btn.classList.add('active');
+            typeFilter = btn.dataset.filter || '';
+            renderTemplates();
+        });
+    });
+
+    filterInput.addEventListener('input', function () {
+        filterTerm = filterInput.value.trim().toLowerCase();
+        renderTemplates();
+    });
+
+    loadTemplates();
+})();
+</script>
+{% endblock %}

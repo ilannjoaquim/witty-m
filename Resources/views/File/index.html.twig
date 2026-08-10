@@ -1,0 +1,222 @@
+{% extends '@MauticCore/Default/content.html.twig' %}
+
+{% block mauticContent 'wittyFiles' %}
+
+{% block headerTitle %}{{ 'mautic.witty.file.header'|trans }}{% endblock %}
+
+{% block actions %}
+    {% include '@MauticCore/Helper/button.html.twig' with {
+        buttons: [
+            {
+                label: 'mautic.witty.file.upload',
+                icon: 'ri-upload-2-line',
+                variant: 'primary',
+                attributes: { id: 'witty-file-upload-btn', type: 'button' }
+            }
+        ]
+    } %}
+{% endblock %}
+
+{% block content %}
+<style>
+    /* Complements des classes Mautic reelles (btn, table, panel...) : pas de
+       reimplementation, juste ce que Mautic ne fournit pas deja. */
+    #witty-file-app .panel { margin-bottom: 0; }
+    .witty-file-kind { font-size: 11px; text-transform: uppercase; color: var(--text-secondary, #6b7280); }
+    .witty-file-size { color: var(--text-secondary, #6b7280); font-size: 13px; white-space: nowrap; }
+</style>
+
+<div id="witty-file-app"
+     data-data-endpoint="{{ path('witty_files_data') }}"
+     data-upload-endpoint="{{ path('witty_files_upload') }}"
+     data-delete-endpoint="{{ path('witty_files_delete') }}">
+
+    <p class="text-muted">{{ 'mautic.witty.file.intro'|trans }}</p>
+
+    <input type="file" id="witty-file-input" multiple hidden>
+
+    <div id="witty-file-list-wrapper" class="panel panel-default">
+        <div class="panel-body pb-0">
+            <div class="input-group d-flex">
+                <span class="input-group-addon"><i class="ri-search-line" aria-hidden="true"></i></span>
+                <input type="search" id="witty-file-filter" class="form-control search" placeholder="{{ 'mautic.witty.file.filter'|trans }}" autocomplete="off">
+            </div>
+        </div>
+        <div id="witty-file-list"></div>
+        <div id="witty-file-empty" class="mt-80 mb-80 col-md-offset-2 col-lg-offset-3 col-md-8 col-lg-6" style="display:none;">
+            {{ include('@MauticCore/Components/content-block.html.twig', {
+                heading: 'mautic.witty.file.empty_heading',
+                copy: 'mautic.witty.file.empty',
+            }) }}
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    var app = document.getElementById('witty-file-app');
+    if (!app || app.dataset.wittyReady === '1') { return; }
+    app.dataset.wittyReady = '1';
+
+    var list        = document.getElementById('witty-file-list');
+    var emptyState  = document.getElementById('witty-file-empty');
+    var filterInput = document.getElementById('witty-file-filter');
+    var fileInput   = document.getElementById('witty-file-input');
+    var uploadBtn   = document.getElementById('witty-file-upload-btn');
+    var allFiles    = [];
+    var filesById   = {};
+    var filterTerm  = '';
+
+    function headersForm() {
+        return { 'X-Requested-With': 'XMLHttpRequest', 'X-CSRF-Token': window.mauticAjaxCsrf || '' };
+    }
+
+    function escapeHtml(value) {
+        var div = document.createElement('div');
+        div.textContent = value == null ? '' : String(value);
+        return div.innerHTML;
+    }
+
+    function formatDate(value) {
+        if (!value) { return '—'; }
+        var date = new Date(value);
+        return isNaN(date.getTime()) ? String(value) : date.toLocaleString();
+    }
+
+    // Volontairement simple (pas de si/ko flottants a la decimale pres) :
+    // c'est un reperage visuel dans une liste, pas une facture.
+    function formatSize(bytes) {
+        bytes = Number(bytes) || 0;
+        if (bytes < 1024) { return bytes + ' o'; }
+        var units = ['Ko', 'Mo', 'Go'];
+        var value = bytes / 1024;
+        var i = 0;
+        while (value >= 1024 && i < units.length - 1) { value /= 1024; i++; }
+        return value.toFixed(1) + ' ' + units[i];
+    }
+
+    function renderError(msg) {
+        emptyState.style.display = 'none';
+        list.innerHTML = '<div class="alert alert-danger m-md">' + escapeHtml(msg) + '</div>';
+    }
+
+    function loadFiles() {
+        fetch(app.dataset.dataEndpoint, { headers: headersForm() })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                if (!data.status) { renderError(data.msg); return; }
+                allFiles = data.files || [];
+                renderFiles();
+            })
+            .catch(function (err) { renderError(err.message); });
+    }
+
+    function renderFiles() {
+        filesById = {};
+        allFiles.forEach(function (file) { filesById[file.id] = file; });
+
+        if (!allFiles.length) {
+            list.innerHTML = '';
+            emptyState.style.display = '';
+            return;
+        }
+
+        emptyState.style.display = 'none';
+
+        var files = !filterTerm ? allFiles : allFiles.filter(function (file) {
+            return (file.filename || '').toLowerCase().indexOf(filterTerm) !== -1;
+        });
+
+        if (!files.length) {
+            list.innerHTML = '<p class="text-muted pa-md">{{ 'mautic.witty.file.filter_empty'|trans|e('js') }}</p>';
+            return;
+        }
+
+        var rows = files.map(function (file) {
+            // Seuls image/document ont un asset_url (cf. AttachmentManager) :
+            // tableur/texte ne sont que des fichiers de travail, pas partageables.
+            var nameCell = file.assetUrl
+                ? '<a href="' + file.assetUrl + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(file.filename) + '</a>'
+                : escapeHtml(file.filename);
+
+            return '' +
+                '<tr>' +
+                    '<td>' + nameCell + '</td>' +
+                    '<td class="witty-file-kind">' + escapeHtml(file.kind) + '</td>' +
+                    '<td class="witty-file-size">' + formatSize(file.size) + '</td>' +
+                    '<td>' + formatDate(file.dateAdded) + '</td>' +
+                    '<td>' + file.id + '</td>' +
+                    '<td class="text-right">' +
+                        '<button type="button" class="btn btn-ghost btn-nospin" data-action="delete" data-id="' + file.id + '" title="{{ 'mautic.core.form.delete'|trans|e('js') }}">' +
+                            '<i class="ri-delete-bin-line" aria-hidden="true"></i>' +
+                        '</button>' +
+                    '</td>' +
+                '</tr>';
+        }).join('');
+
+        list.innerHTML =
+            '<div class="table-responsive">' +
+                '<table class="table table-hover witty-file-table">' +
+                    '<thead><tr>' +
+                        '<th>{{ 'mautic.witty.file.name'|trans|e('js') }}</th>' +
+                        '<th>{{ 'mautic.witty.file.kind'|trans|e('js') }}</th>' +
+                        '<th>{{ 'mautic.witty.file.size'|trans|e('js') }}</th>' +
+                        '<th>{{ 'mautic.core.date.added'|trans|default('Added')|e('js') }}</th>' +
+                        '<th>ID</th>' +
+                        '<th></th>' +
+                    '</tr></thead>' +
+                    '<tbody>' + rows + '</tbody>' +
+                '</table>' +
+            '</div>';
+
+        list.querySelectorAll('[data-action="delete"]').forEach(function (el) {
+            el.addEventListener('click', function () { deleteFile(el.dataset.id); });
+        });
+    }
+
+    function uploadFile(file) {
+        var body = new FormData();
+        body.append('file', file);
+
+        // Pas de Content-Type explicite : le navigateur doit poser lui-meme la
+        // frontiere multipart.
+        fetch(app.dataset.uploadEndpoint, {
+            method: 'POST',
+            headers: { 'X-Requested-With': 'XMLHttpRequest', 'X-CSRF-Token': window.mauticAjaxCsrf || '' },
+            body: body
+        })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                if (!data.status) { window.alert(data.msg || 'Erreur'); return; }
+                loadFiles();
+            })
+            .catch(function (err) { window.alert(err.message); });
+    }
+
+    function deleteFile(id) {
+        var file = filesById[id];
+        if (!window.confirm('{{ 'mautic.witty.file.delete_confirm'|trans|e('js') }} (' + (file ? file.filename : id) + ')')) { return; }
+
+        fetch(app.dataset.deleteEndpoint, { method: 'POST', headers: headersForm(), body: new URLSearchParams({ id: id }) })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                if (!data.status) { window.alert(data.msg || 'Erreur'); return; }
+                loadFiles();
+            });
+    }
+
+    uploadBtn.addEventListener('click', function () { fileInput.click(); });
+    fileInput.addEventListener('change', function () {
+        Array.prototype.forEach.call(fileInput.files, uploadFile);
+        fileInput.value = '';
+    });
+
+    filterInput.addEventListener('input', function () {
+        filterTerm = filterInput.value.trim().toLowerCase();
+        renderFiles();
+    });
+
+    loadFiles();
+})();
+</script>
+{% endblock %}

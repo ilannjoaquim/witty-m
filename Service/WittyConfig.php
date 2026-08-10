@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MauticPlugin\WittyBundle\Service;
 
+use Mautic\CoreBundle\Helper\PathsHelper;
 use Mautic\IntegrationsBundle\Exception\IntegrationNotFoundException;
 use Mautic\IntegrationsBundle\Helper\IntegrationsHelper;
 use Mautic\PluginBundle\Entity\Integration;
@@ -59,6 +60,7 @@ class WittyConfig
 
     public function __construct(
         private IntegrationsHelper $integrationsHelper,
+        private PathsHelper $pathsHelper,
     ) {
     }
 
@@ -239,6 +241,21 @@ class WittyConfig
     public function hasCustomLogo(): bool
     {
         return '' !== $this->getCustomLogoFilename();
+    }
+
+    /**
+     * Contrairement au logo, le favicon n'a pas de nom de fichier variable a
+     * retenir en base (BrandingAssetManager::storeFavicon() l'enregistre
+     * toujours sous le meme nom, cf. sa docblock) : sa presence se verifie
+     * directement sur disque. Meme gate sur isPublished() que le logo.
+     */
+    public function hasCustomFavicon(): bool
+    {
+        if (!$this->isPublished()) {
+            return false;
+        }
+
+        return is_file(rtrim($this->pathsHelper->getMediaPath(), '/').'/images/favicon.ico');
     }
 
     /**

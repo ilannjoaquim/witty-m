@@ -4,63 +4,50 @@ declare(strict_types=1);
 
 namespace MauticPlugin\WittyBundle\Service\Template;
 
+use MauticPlugin\WittyBundle\Entity\WittyTemplate;
+
 /**
- * Bibliotheque des templates de landing page livres avec le plugin.
+ * Bibliotheque des templates de landing page geres depuis la section
+ * Witty > Templates (cf. TemplateManager, Controller/TemplateController.php).
  *
- * Un template = un dossier dans Templates/Page/ contenant manifest.json et
- * template.html. Ajouter un template = deposer un dossier, rien a declarer.
+ * Avant la section Templates, ces templates etaient des dossiers livres avec
+ * le plugin (Templates/Page/) ; ils ont ete repris dans witty_templates par
+ * Migrations/Version_2_8_0.php et restent modifiables/supprimables comme
+ * n'importe quel template cree depuis l'UI.
  */
 class PageTemplateLibrary
 {
-    /** @var array<string, PageTemplate>|null */
-    private ?array $templates = null;
-
-    private string $directory;
-
-    public function __construct(?string $directory = null)
+    public function __construct(private TemplateManager $manager)
     {
-        $this->directory = $directory ?? \dirname(__DIR__, 2).'/Templates/Page';
     }
 
     /**
-     * @return array<string, PageTemplate>
+     * @return array<string, WittyTemplate>
      */
     public function all(): array
     {
-        if (null !== $this->templates) {
-            return $this->templates;
+        $templates = [];
+
+        foreach ($this->manager->listByType(WittyTemplate::TYPE_PAGE) as $template) {
+            $templates[$template->getKey()] = $template;
         }
 
-        $this->templates = [];
-
-        if (!is_dir($this->directory)) {
-            return $this->templates;
-        }
-
-        foreach ((array) glob($this->directory.'/*', GLOB_ONLYDIR) as $path) {
-            $template = $this->load((string) $path);
-
-            if (null !== $template) {
-                $this->templates[$template->key] = $template;
-            }
-        }
-
-        ksort($this->templates);
-
-        return $this->templates;
+        return $templates;
     }
 
-    public function get(string $key): ?PageTemplate
+    public function get(string $key): ?WittyTemplate
     {
-        return $this->all()[$key] ?? null;
+        return $this->manager->findByTypeAndKey(WittyTemplate::TYPE_PAGE, $key);
     }
 
     /**
+     * Static : voir EmailTemplateLibrary::render(), meme raisonnement.
+     *
      * @param array<string, string> $values
      *
      * @return array{html: string, missing: array<int, string>}
      */
-    public function render(PageTemplate $template, array $values): array
+    public static function render(WittyTemplate $template, array $values): array
     {
         $resolved = $template->getDefaults();
 
@@ -74,7 +61,7 @@ class PageTemplateLibrary
         ))));
 
         $html = PlaceholderRenderer::render(
-            $template->html,
+            $template->getHtml(),
             $resolved,
             $template->getPlaceholderKeys(),
             $template->getJsContextKeys(),
@@ -82,31 +69,5 @@ class PageTemplateLibrary
         );
 
         return ['html' => $html, 'missing' => $missing];
-    }
-
-    private function load(string $path): ?PageTemplate
-    {
-        $manifestFile = $path.'/manifest.json';
-        $htmlFile     = $path.'/template.html';
-
-        if (!is_file($manifestFile) || !is_file($htmlFile)) {
-            return null;
-        }
-
-        $manifest = json_decode((string) file_get_contents($manifestFile), true);
-
-        if (!is_array($manifest)) {
-            return null;
-        }
-
-        return new PageTemplate(
-            (string) ($manifest['key'] ?? basename($path)),
-            (string) ($manifest['name'] ?? basename($path)),
-            (string) ($manifest['description'] ?? ''),
-            (string) ($manifest['goal'] ?? ''),
-            array_map('strval', (array) ($manifest['rules'] ?? [])),
-            array_values((array) ($manifest['placeholders'] ?? [])),
-            (string) file_get_contents($htmlFile),
-        );
     }
 }

@@ -92,6 +92,35 @@ class AttachmentManagerTest extends TestCase
         $this->assertSame(WittyAttachment::KIND_TEXT, $attachment->getKind());
     }
 
+    public function testUploadIsNotPinnedByDefault(): void
+    {
+        $manager    = $this->manager();
+        $attachment = $manager->upload($this->uploadedFile('brief.md', '# Brief'));
+
+        $this->assertFalse($attachment->isPinned(), 'Un upload depuis le chat ne doit pas survivre au nettoyage automatique par defaut.');
+    }
+
+    public function testUploadCanBePinnedForTheFilesLibrary(): void
+    {
+        $manager    = $this->manager();
+        $attachment = $manager->upload($this->uploadedFile('brief.md', '# Brief'), null, true);
+
+        $this->assertTrue($attachment->isPinned());
+    }
+
+    public function testDeleteRemovesBothTheEntityAndThePhysicalFile(): void
+    {
+        $manager    = $this->manager();
+        $attachment = $manager->upload($this->uploadedFile('leads.csv', "Email\na@b.test\n"), null, true);
+        $path       = $this->mediaDir.'/witty/uploads/'.$attachment->getStoredFilename();
+
+        $this->assertFileExists($path);
+
+        $manager->delete($attachment);
+
+        $this->assertFileDoesNotExist($path);
+    }
+
     public function testResolveThrowsWhenAttachmentDoesNotBelongToTheCurrentUser(): void
     {
         $repository = $this->createMock(WittyAttachmentRepository::class);

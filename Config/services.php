@@ -34,8 +34,6 @@ return function (ContainerConfigurator $configurator): void {
     // ToolRegistry a partir de tools/list, jamais par le conteneur.
     $excludes = [
         'Service/Llm/Dto',
-        'Service/Template/EmailTemplate.php',
-        'Service/Template/PageTemplate.php',
         'Service/Tool/McpTool.php',
     ];
 

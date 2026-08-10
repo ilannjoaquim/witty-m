@@ -235,8 +235,18 @@ email. L'upload se fait à la sélection du fichier, pas à l'envoi du message :
   visuelle de la note technique.
 - **Nettoyage** — un fichier joint puis jamais envoyé (onglet fermé avant Envoyer) reste orphelin
   (`conversation` null) ; `php bin/console witty:attachments:prune-orphans` le supprime après 24h
-  de grâce (fichier ou Asset, et ligne en base). À planifier via le cron système, comme
-  `witty:meet:reconcile-attendance` (Mautic n'a pas d'ordonnanceur interne).
+  de grâce (fichier ou Asset, et ligne en base), **sauf s'il est `pinned`** (voir bibliothèque
+  Fichiers ci-dessous). À planifier via le cron système, comme `witty:meet:reconcile-attendance`
+  (Mautic n'a pas d'ordonnanceur interne).
+- **Bibliothèque "Fichiers" (`/witty/files`, `Controller/FileController.php`)** — tout ce qu'un
+  utilisateur a déjà envoyé à l'agent, réutilisable dans n'importe quelle conversation future sans
+  le rejoindre à nouveau : upload direct depuis cette page (`WittyAttachment::$pinned = true`, donc
+  jamais nettoyé automatiquement, contrairement à un upload depuis le trombone du chat) et
+  suppression manuelle. L'agent le retrouve par son nom via **`list_attachments`**
+  (`WittyAttachmentRepository::findAllForUser()`, filtre `LIKE` sur le nom de fichier) — sans ça,
+  il ne connaissait que les pièces jointes du message en cours. Aucune nouvelle notion côté
+  `AttachmentManager` : `upload()`/`resolve()`/`assetUrl()` sont déjà scopés par utilisateur, pas
+  par conversation, la bibliothèque ne fait que les exposer sans filtre de conversation.
 - **Hors scope volontaire** — pas de vision multimodale (le modèle ne "voit" jamais les pixels d'une
   image, seulement son id et son URL d'asset) : aucun des deux cas d'usage demandés (import de
   leads, image dans un email) n'en avait besoin, et ça aurait touché `Service/Llm/*` (DTO + les 4
@@ -290,15 +300,15 @@ Config/services.php        autowiring, auto-tag des outils, alias mautic.integra
 Integration/               intégration Mautic : c'est elle qui rend la fiche du plugin éditable
 Form/Type/                 formulaires des onglets Details (clé API) et Fonctionnalités
 Themes/                    thèmes Mautic livrés, recopiés dans themes/ à l'installation
-Templates/Email/           templates d'email livrés (MJML source + HTML compilé + manifeste)
-Templates/Page/            templates de landing page livrés (HTML + manifeste, mode code source)
-Entity/                    conversations, messages, journal d'audit (+ repositories)
+Templates/Email/           seed des templates d'email (lu par la migration + les tests, plus par le runtime)
+Templates/Page/            seed des templates de landing page (idem)
+Entity/                    conversations, messages, skills, templates, journal d'audit (+ repositories)
 Migrations/                création des tables sur une instance déjà installée
 Service/WittyConfig.php    lecture centralisée de la config de l'intégration
 Service/Conversation/      transcript côté serveur, filtré par utilisateur
 Service/Audit/             écriture du journal des actions
 Service/Usage/             compteur de tokens et quota quotidien
-Service/Template/          bibliothèque de templates et substitution
+Service/Template/          CRUD des templates (base) et substitution
 Service/Theme/             déploiement des thèmes dans themes/
 Service/Llm/               3 clients HTTP + normalisation du tool calling
 Service/Agent/             boucle de l'agent + prompt système
@@ -322,6 +332,37 @@ d'où une modale qui n'affiche que la description, sans champ ni bouton. Quatre 
    Le fichier ne doit pas se terminer par `Integration.php`, sinon il serait vu comme une 2ᵉ intégration.
 4. les tags `mautic.basic_integration` / `mautic.config_integration`, posés automatiquement par
    l'`autoconfigure()` de `Config/services.php`.
+
+### Personnalisation visuelle (logo, favicon)
+
+Onglet Fonctionnalités > Affichage de la fiche du plugin : `Form/Type/FeatureSettingsType.php`
+(upload) → `Service/Branding/BrandingAssetManager.php` (écriture sur disque) →
+`EventListener/BrandingSubscriber.php` (remplacement visuel, en CSS, des pages admin).
+
+**Favicon.** `AssetsHelper::getOverridableUrl()` (core) cherche `media/images/favicon.ico` avant
+de retomber sur celui du plugin — c'est ce que `head.html.twig` (core) appelle, donc ça suffit pour
+les pages admin (`/s/...`). **Insuffisant pour tout ce qui est public** (landing page, aperçu web
+d'un email, page de désabonnement...) : ces gabarits n'incluent jamais `head.html.twig` et ne
+posent donc aucun `<link rel="icon">` explicite — le navigateur retombe sur la requête implicite
+`/favicon.ico` à la racine du site, servie par le fichier statique du document root de Mautic
+(là où vit `index.php`), jamais touché par l'upload. `BrandingAssetManager::storeFavicon()` écrit
+donc le fichier aux deux endroits.
+
+**Logo.** Pas de mécanisme d'override natif comme pour le favicon : `navbar.html.twig` (core)
+inline le SVG du logo directement en HTML via `source()`, il n'y a pas de fichier sur disque à
+remplacer. `BrandingSubscriber` injecte donc un `<style>` en fin de `<head>` de chaque page admin,
+qui masque ce SVG et affiche l'image importée en fond à la place. Point d'attention : Mautic rend
+**deux** blocs logo dans la navbar, tous deux avec la classe `.mautic-brand` — `.brand-logo--desktop`
+(masqué en mobile) et `.brand-logo--mobile` (affiché seulement en mobile, pensé pour un logo
+carré). Cibler `.mautic-brand` seul revient à appliquer la même image, potentiellement large, aux
+deux emplacements — écrasée sans discernement au premier changement de layout, et facilement
+repris par une règle Mautic plus spécifique (`.navbar-nav > .mautic-brand`, spécificité plus
+élevée). `BrandingSubscriber` cible donc chaque bloc séparément (`.brand-logo--desktop.mautic-brand`,
+`.brand-logo--mobile.mautic-brand`, deux classes = plus spécifique) et passe `!important` sur
+chaque propriété, pas seulement `display`. Le bloc mobile reçoit le **favicon**, pas le logo : il
+est nativement carré, contrairement au logo (format libre), donc mieux adapté à cet emplacement
+carré. Les deux réglages sont indépendants — un favicon seul personnalise déjà le bloc mobile,
+même sans logo importé.
 
 ### Couche LLM
 
@@ -374,9 +415,9 @@ outils.
 | `update_entity` | ● | Renomme, décrit, (dé)publie un objet existant, tous types du catalogue ; `category_id` pour les types qui en portent une |
 | `delete_entity` | ● | Suppression définitive, tous types du catalogue |
 | `create_category` | ● | Catégorie Mautic rattachée à un type précis (bundle) : email, page, segment, campaign, form, asset, stage, point, dynamic_content, message, meet_room |
-| `list_email_templates` | | Templates d'email livrés + consigne de rédaction de chaque emplacement |
-| `create_email_from_template` | ● | Email construit à partir d'un template du plugin |
-| `list_page_templates` | | Templates de landing page livrés + consigne de chaque emplacement |
+| `list_email_templates` | | Templates d'email (section Witty > Templates) + consigne de rédaction de chaque emplacement |
+| `create_email_from_template` | ● | Email construit à partir d'un template de la section Templates |
+| `list_page_templates` | | Templates de landing page (section Witty > Templates) + consigne de chaque emplacement |
 | `create_page_from_template` | ● | Landing page construite à partir d'un template, toujours en mode code source |
 | `create_email` | ● | Email template ou list |
 | `create_email_variant` | ● | Variante de test A/B d'un email existant (vrai mécanisme Mautic, pas un second email indépendant) |
@@ -418,6 +459,7 @@ outils.
 | `delete_meet_recording` | ● | Supprime un enregistrement ou un artefact, définitif |
 | `convert_meet_recording_to_asset` | ● | Republie un enregistrement comme Asset Mautic (partageable par email) |
 | `read_attachment` | | Lit une piece jointe du chat (texte, apercu de tableur, ou URL d'asset pour image/document) |
+| `list_attachments` | | Retrouve un fichier deja envoye par son nom (bibliotheque Fichiers), pas seulement ceux du message en cours |
 | `import_leads_from_file` | ● | Import de contacts depuis un tableur joint, plafonne a 500 lignes, mapping de colonnes fourni par l'agent |
 
 `update_entity` et `delete_entity` acceptent plusieurs types d'objets : leur permission ne peut
@@ -519,71 +561,78 @@ Trois pièges du format, tous couverts par `Tests/Theme/ThemeIntegrityTest.php` 
 Une mise à jour du plugin **écrase** `themes/<clé>/`. Pour partir d'un de ces thèmes et le
 personnaliser, le dupliquer d'abord dans *Paramètres › Thèmes* : la copie n'est plus touchée.
 
-### Bibliothèque de templates d'email
+### Section Templates (Witty > Templates)
 
-```
-Templates/Email/webinar/template.mjml   source, avec les consignes de rédaction en commentaire
-Templates/Email/webinar/template.html   HTML pré-compilé, celui qui part chez le destinataire
-Templates/Email/webinar/manifest.json   nom, objectif, règles, et la consigne de chaque emplacement
-```
+Les templates d'email et de landing page que l'agent utilise (`list_email_templates` /
+`create_email_from_template`, `list_page_templates` / `create_page_from_template`) sont gérés
+depuis une section dédiée de l'UI Mautic, pas livrés en fichiers : `Entity/WittyTemplate.php`
+(table `witty_templates`), `Service/Template/TemplateManager.php` (CRUD) et
+`Controller/TemplateController.php` (preview/modifier/supprimer/créer, même mécanique que la
+section Skills). Un template = un `type` (`email` ou `page`), une `key` (identifiant utilisé par
+l'agent, dérivée du nom si laissée vide), un `goal`/des `rules`/des `placeholders` (même structure
+que l'ancien `manifest.json`, en JSON) et un champ `html`.
 
-Ajouter un template = déposer un dossier avec ces trois fichiers, puis lancer
-`./dev/build-templates.sh`. Rien à déclarer dans le code.
-
-**Le HTML est versionné** parce que PHP ne sait pas compiler du MJML : le compilateur officiel
-est en Node. Le `.mjml` reste livré et est enregistré dans `bundle_grapesjsbuilder` à la création
-de l'email, donc **l'email reste éditable dans le builder MJML** de Mautic. Dépendance optionnelle :
-si le plugin GrapesJS est absent, seul le HTML est enregistré et l'outil le signale.
+**Le code est toujours du HTML final, y compris pour un email.** PHP ne sait pas compiler du
+MJML : le compilateur officiel tourne en Node (`dev/build-templates.sh`) ou, côté builder Mautic,
+dans le navigateur (`grapesjs-mjml`) — aucune des deux options n'est disponible pour une
+sauvegarde faite depuis un formulaire serveur, et le plugin n'ajoute pas de dépendance Node pour
+ça. Un template d'email s'écrit donc directement en HTML, exactement comme un template de landing
+page ; les tokens Mautic (`{contactfield=...}`, `{unsubscribe_url}`...) fonctionnent à l'identique,
+ce sont de simples chaînes substituées par Mautic à l'envoi, indépendamment de la façon dont le
+HTML a été produit. Conséquence assumée : contrairement à l'ancien mécanisme (MJML source
+enregistré dans `bundle_grapesjsbuilder` à la création de l'email), un email créé depuis un
+template géré ici n'est plus éditable dans le builder MJML — seul le HTML brut.
 
 **La substitution est faite par le plugin, pas par le modèle.** Demander à un LLM de recracher
 1 200 lignes de HTML compilé sans faute n'est pas fiable : il fournit le texte de chaque bloc,
-le plugin garantit la structure. Trois garde-fous :
+le plugin garantit la structure. Trois garde-fous, communs aux deux types de template :
 
 - toutes les valeurs sont échappées (`htmlspecialchars`) — le modèle produit du texte, pas du
   balisage. Vérifié : `<script>alert(1)</script>` ressort en `&lt;script&gt;` ;
 - `REGISTRATION_URL`, `LOGO_URL` et `HERO_IMAGE_URL` doivent être en `http(s)` — un
   `javascript:` est refusé avant d'atteindre le `href` ;
-- seuls les emplacements déclarés au manifeste sont substitués, et un emplacement obligatoire
-  manquant fait échouer l'appel avec la liste des clés à fournir.
+- seuls les emplacements déclarés dans `placeholders` sont substitués, et un emplacement
+  obligatoire manquant fait échouer l'appel avec la liste des clés à fournir.
 
-Les consignes du manifeste (le *pourquoi* de chaque bloc, l'exemple, ce qu'il ne faut pas écrire)
-sont renvoyées au modèle par `list_email_templates`. C'est ce qui fait la différence entre un
-email structuré et un email générique : sans elles, le modèle remplit les cases au jugé.
+Les consignes de `placeholders` (le *pourquoi* de chaque bloc, l'exemple, ce qu'il ne faut pas
+écrire) sont renvoyées au modèle par `list_email_templates`/`list_page_templates`. C'est ce qui
+fait la différence entre un email structuré et un email générique : sans elles, le modèle remplit
+les cases au jugé — donc plus le manifeste d'un template créé depuis l'UI est soigné, mieux
+l'agent le remplit.
 
-Deux templates livrés, tous deux dérivés des Thèmes (voir plus haut) — même structure et mêmes
-consignes, traduites en jetons `{{DOUBLE_ACCOLADE}}` pour la substitution automatique :
+`Migrations/Version_2_8_0.php` a repris dans `witty_templates` les 4 templates jusqu'ici livrés en
+fichiers (`Templates/Email/`, `Templates/Page/`, lus via
+`Service/Template/BuiltInTemplateLoader.php`) : ils restent disponibles à l'agent après la mise à
+jour, et deviennent immédiatement modifiables/supprimables comme n'importe quel template créé
+depuis l'UI. Ces dossiers ne sont plus lus à l'exécution — uniquement par cette migration (une
+seule fois) et par les tests de `Tests/Service/Template/` (fixtures réalistes, sans base de
+données).
 
-| Template | Dérivé du thème | Emplacements |
-|---|---|---|
-| `webinar` | `webinar-last` | 26 (24 obligatoires) — logo et visuel avec valeur par défaut |
-| `webinar-day0` | `webinar-day0` | 27 — annonce day-0, structure P.A.S. + 2 citations verbatim |
+| Template | Type | Dérivé de | Emplacements |
+|---|---|---|---|
+| `webinar` | email | thème `webinar-last` | 26 (24 obligatoires) — logo et visuel avec valeur par défaut |
+| `webinar-day0` | email | thème `webinar-day0` | 27 — annonce day-0, structure P.A.S. + 2 citations verbatim |
+| `confirmation-webinar` | page | — (jamais un thème, JS fonctionnel) | 37 (24 obligatoires) |
+| `webinar-landing` | page | thème `landing-webinar` | 66 (la majorité obligatoires — page d'inscription complète) |
 
-`HOOK` (dans `webinar-day0`) est le premier emplacement à utiliser le contexte `html_br` : la
-consigne autorise explicitement un `<br/>` pour une accroche sur deux lignes. `EmailTemplate` /
-`EmailTemplateLibrary` ont été généralisés pour le supporter (même mécanisme que la bibliothèque
-de pages, voir plus bas), testé pour confirmer qu'un `<img onerror=...>` glissé dans le même champ
-reste neutralisé.
+`HOOK` (dans `webinar-day0`) est le premier emplacement à avoir utilisé le contexte `html_br` : la
+consigne autorise explicitement un `<br/>` pour une accroche sur deux lignes (voir le tableau des
+contextes ci-dessous). Testé pour confirmer qu'un `<img onerror=...>` glissé dans le même champ
+reste neutralisé, sans casser les vraies balises `<img>` du reste de l'email (logo, visuel
+d'accroche).
 
-### Bibliothèque de templates de landing page
+### Détails spécifiques à la landing page
 
-Même principe, pour les pages : `list_page_templates` / `create_page_from_template`,
-`Service/Template/PageTemplateLibrary.php`, un dossier par template dans `Templates/Page/`.
+Même principe que l'email pour la substitution (`list_page_templates` /
+`create_page_from_template`, `Service/Template/PageTemplateLibrary.php`) ; ce qui suit couvre ce
+qui est propre à ce type (voir tableau plus haut pour la liste des templates) :
 
-| Template | Dérivé du thème | Emplacements |
-|---|---|---|
-| `confirmation-webinar` | — (jamais un thème, JS fonctionnel) | 37 (24 obligatoires) |
-| `webinar-landing` | `landing-webinar` | 66 (la majorité obligatoires — page d'inscription complète) |
-
-```
-Templates/Page/<clé>/source.html     source integralement annote (WHY/HOW), reference
-Templates/Page/<clé>/template.html   version livree a la substitution, commentaires de fond retires
-Templates/Page/<clé>/manifest.json   nom, objectif, regles, consigne de chaque emplacement
-```
-
-Pas de compilation ici (page = HTML brut, pas de MJML) : `template.html` est directement le
-contenu substitué et enregistré. `source.html` garde l'intégralité des commentaires pédagogiques
-d'origine pour qui doit un jour retoucher le template à la main ; ils sont volontairement absents
-de `template.html`, qui devient le code source réel d'une page visible par de vrais visiteurs.
+`Templates/Page/<clé>/source.html`, conservé dans le dossier de seed pour `confirmation-webinar`
+et `webinar-landing`, garde l'intégralité des commentaires pédagogiques (WHY/HOW) d'origine pour
+qui doit un jour retoucher le template à la main ; ils sont volontairement absents de
+`template.html` (ce qui est réellement importé dans `html` par la migration), qui devient le code
+source réel d'une page visible par de vrais visiteurs. Un template créé depuis l'UI n'a bien sûr
+pas cette distinction : un seul champ `html`.
 
 **Toujours en mode code source, jamais en thème.** `create_page_from_template` enregistre
 systématiquement `template=mautic_code_mode` sur la page (jamais `blank`, jamais un thème du
@@ -738,3 +787,9 @@ liste réelle est refetchée à chaque ouverture du chat.
   clé API).
   Une commande de purge planifiée est le complément logique.
 - **Outils encore absents** : tests A/B, gestion des rapports, import de contacts, webhooks.
+- **Le seed de `witty_templates` ne se rejoue pas** — `Migrations/Version_2_8_0.php` ne s'exécute
+  qu'à la création de la table (`isApplicable()`) : modifier `Templates/Email/webinar/template.mjml`
+  puis relancer `dev/build-templates.sh` ne change rien sur une instance déjà migrée, il faut
+  éditer le template correspondant depuis l'UI (section Witty > Templates). Volontaire — une
+  instance dont un utilisateur a modifié/supprimé un template livré ne doit pas se le voir
+  réimposer à la prochaine mise à jour du plugin.
