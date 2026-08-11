@@ -38,6 +38,7 @@ class AttachmentManager
         'csv', 'xls', 'xlsx', 'txt', 'md',
         'jpg', 'jpeg', 'png', 'gif', 'webp',
         'pdf', 'doc', 'docx', 'ppt', 'pptx', 'odt', 'ods', 'odp',
+        'woff', 'woff2', 'ttf', 'otf',
     ];
 
     /** @var array<string, string> */
@@ -52,6 +53,10 @@ class AttachmentManager
         'xlsx' => WittyAttachment::KIND_SPREADSHEET,
         'txt'  => WittyAttachment::KIND_TEXT,
         'md'   => WittyAttachment::KIND_TEXT,
+        'woff'  => WittyAttachment::KIND_FONT,
+        'woff2' => WittyAttachment::KIND_FONT,
+        'ttf'   => WittyAttachment::KIND_FONT,
+        'otf'   => WittyAttachment::KIND_FONT,
     ];
 
     private const MAX_SIZE_BYTES = 15 * 1024 * 1024;
@@ -97,7 +102,10 @@ class AttachmentManager
             ->setKind($kind)
             ->setSize((int) $file->getSize());
 
-        if (in_array($kind, [WittyAttachment::KIND_IMAGE, WittyAttachment::KIND_DOCUMENT], true)) {
+        if (in_array($kind, [WittyAttachment::KIND_IMAGE, WittyAttachment::KIND_DOCUMENT, WittyAttachment::KIND_FONT], true)) {
+            // Une police a besoin d'une URL stable et publique exactement comme
+            // une image : un @font-face dans un email/une page reference cette
+            // URL depuis le HTML final, pas le fichier tel quel.
             $asset = $this->createLocalAsset($file);
             $attachment->setAssetId($asset->getId())
                 ->setStoredFilename((string) $asset->getPath());
@@ -166,6 +174,7 @@ class AttachmentManager
         return match ($attachment->getKind()) {
             WittyAttachment::KIND_TEXT       => $this->previewText($attachment),
             WittyAttachment::KIND_SPREADSHEET => $this->previewSpreadsheet($attachment),
+            WittyAttachment::KIND_FONT       => $this->previewFont($attachment),
             default                          => $this->previewBinary($attachment),
         };
     }
@@ -314,6 +323,50 @@ class AttachmentManager
             'type'      => $attachment->getKind(),
             'note'      => "Contenu binaire : pas de lecture textuelle disponible. Utilise l'URL de l'asset pour le referencer (email, landing page, asset).",
             'asset_url' => $this->assetUrl($attachment),
+        ];
+    }
+
+    /**
+     * A la difference d'une image (juste une URL a mettre dans un src), une
+     * police demande une regle @font-face pour devenir utilisable : la
+     * note fournit un exemple pret a adapter, avec le bon `format()` pour
+     * l'extension. Rappelle aussi une limite reelle, pas une limite du
+     * plugin : le support des polices auto-hebergees (comme les Google Fonts
+     * d'ailleurs) est tres inegal selon les clients email (Outlook desktop et
+     * la plupart des webmails ignorent @font-face), contrairement a une
+     * landing page, rendue par un vrai navigateur, ou ca fonctionne comme sur
+     * n'importe quel site.
+     *
+     * @return array<string, mixed>
+     */
+    private function previewFont(WittyAttachment $attachment): array
+    {
+        $format = match ($attachment->getExtension()) {
+            'woff2' => 'woff2',
+            'woff'  => 'woff',
+            'ttf'   => 'truetype',
+            'otf'   => 'opentype',
+            default => $attachment->getExtension(),
+        };
+
+        $family = pathinfo($attachment->getOriginalFilename(), PATHINFO_FILENAME);
+        $url    = $this->assetUrl($attachment);
+
+        return [
+            'type'      => WittyAttachment::KIND_FONT,
+            'asset_url' => $url,
+            'note'      => "Police auto-hebergee, PAS une Google Font : a declarer via @font-face avant de l'utiliser, "
+                ."en referencant l'URL de l'asset. Toujours prevoir une police de repli (ex. Arial, sans-serif), le "
+                .'support de @font-face est tres inegal en email (Outlook desktop et la plupart des webmails '
+                .'l ignorent silencieusement, la police de repli s applique alors) — fiable en revanche sur une '
+                .'landing page, rendue par un vrai navigateur.',
+            'css_example' => sprintf(
+                "@font-face { font-family: '%s'; src: url('%s') format('%s'); }\nbody { font-family: '%s', Arial, sans-serif; }",
+                $family,
+                $url,
+                $format,
+                $family,
+            ),
         ];
     }
 

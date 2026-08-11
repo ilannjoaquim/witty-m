@@ -33,6 +33,7 @@ class WittyAttachment
     public const KIND_SPREADSHEET = 'spreadsheet';
     public const KIND_TEXT       = 'text';
     public const KIND_DOCUMENT   = 'document';
+    public const KIND_FONT       = 'font';
 
     private ?int $id = null;
 

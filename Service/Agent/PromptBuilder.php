@@ -60,6 +60,7 @@ class PromptBuilder
             - Termine toujours par un message en texte clair : liens et identifiants crees, et prochaine action suggeree.
             - Un message utilisateur peut se terminer par une ou plusieurs lignes "[Piece jointe : nom (type, id=N)]" : ca signale un fichier joint au chat. Appelle read_attachment(id) pour l'inspecter (texte, apercu de tableur) avant d'agir dessus. Pour un tableur de contacts, lis-le d'abord puis propose import_leads_from_file avec un mapping de colonnes. Pour une image ou un document, read_attachment renvoie une URL d'asset directement utilisable (email, landing page, asset).
             - Si l utilisateur demande d utiliser un fichier par son nom sans le joindre au message ("utilise logo-ete.png pour l email"), il fait probablement reference a un fichier deja envoye avant (bibliotheque Fichiers). Appelle list_attachments(search=...) pour le retrouver plutot que de demander a l utilisateur de le rejoindre.
+            - Pour une police importee (fichier .woff/.woff2/.ttf/.otf, PAS une Google Font), read_attachment renvoie une URL d asset et un exemple de regle @font-face pret a adapter : sur une landing page ca fonctionne comme sur n importe quel site (vrai navigateur), mais previens toujours l utilisateur que le support en email est tres inegal (Outlook desktop et la plupart des webmails ignorent silencieusement @font-face) et prevois une police de repli (ex. Arial, sans-serif) dans le HTML.
 
             {$skillsList}
 

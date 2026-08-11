@@ -200,11 +200,12 @@ l'utilisateur) sans casser les outils Mautic locaux.
   ils passent uniquement par l'infrastructure Bright Data. `AuditLogger` les journalise comme
   n'importe quel autre outil.
 
-### Pièces jointes (docs, tableurs, images)
+### Pièces jointes (docs, tableurs, images, polices)
 
 Un bouton trombone dans le chat permet de joindre un fichier (image, CSV/XLS/XLSX, texte, PDF/
-Office) à un message — ex. importer une liste de leads, ou fournir une image à réutiliser dans un
-email. L'upload se fait à la sélection du fichier, pas à l'envoi du message : `POST /witty/upload`
+Office, police `.woff`/`.woff2`/`.ttf`/`.otf`) à un message — ex. importer une liste de leads,
+fournir une image ou une police de marque à réutiliser dans un email/une landing page. L'upload se
+fait à la sélection du fichier, pas à l'envoi du message : `POST /witty/upload`
 (`WittyController::uploadAction()`) renvoie immédiatement un id, que le front inclut dans
 `attachment_ids` au moment d'envoyer le message.
 
@@ -213,13 +214,20 @@ email. L'upload se fait à la sélection du fichier, pas à l'envoi du message :
   Le rattachement se fait par référence d'objet (`AttachmentManager::attachToConversation()`,
   appelé depuis `AgentRunner::run()`), jamais par id scalaire — Doctrine résout l'ordre d'INSERT au
   flush unique de fin de tour, pas besoin de flush intermédiaire.
-- **`Service/Attachment/AttachmentManager.php`** — deux destinations selon le type : image/document
-  deviennent un `Asset` Mautic **local** (`Asset::setFile()` + `preUpload()` + `upload()`, publié
-  immédiatement — contrairement aux objets créés par l'agent, un fichier vient explicitement de
-  l'utilisateur, le laisser en brouillon casserait le cas d'usage "image utilisable tout de suite
-  dans un email") ; tableur/texte restent de simples fichiers de travail sous `media/witty/uploads/`,
-  jamais publiés. Extension et taille validées contre une allowlist propre au plugin, plafonnée par
-  la politique globale du site (`allowed_extensions`/`max_size`).
+- **`Service/Attachment/AttachmentManager.php`** — trois destinations selon le type : image/document/
+  **police** (`WittyAttachment::KIND_FONT`, `.woff`/`.woff2`/`.ttf`/`.otf`) deviennent un `Asset`
+  Mautic **local** (`Asset::setFile()` + `preUpload()` + `upload()`, publié immédiatement —
+  contrairement aux objets créés par l'agent, un fichier vient explicitement de l'utilisateur, le
+  laisser en brouillon casserait le cas d'usage "image/police utilisable tout de suite dans un
+  email") ; tableur/texte restent de simples fichiers de travail sous `media/witty/uploads/`, jamais
+  publiés. Une police a besoin de la même URL stable et publique qu'une image (`@font-face` ne peut
+  pas référencer un fichier de travail), d'où le même chemin Asset plutôt qu'un simple fichier.
+  Extension et taille validées contre une allowlist propre au plugin, plafonnée par la politique
+  globale du site (`allowed_extensions`/`max_size`) — **deux verrous, pas un seul** : ajouter une
+  extension à `AttachmentManager::ALLOWED_EXTENSIONS` ne suffit pas si la politique globale de
+  l'instance (Paramètres > Configuration > onglet Assets > "Extensions de fichiers autorisées",
+  `AssetBundle\Form\Type\ConfigType`) ne les liste pas aussi — son défaut Mautic ne contient aucune
+  extension de police, à ajouter manuellement une fois par instance.
   **Deux appels non documentés côté Mautic mais indispensables avant `preUpload()`/`upload()`**,
   trouvés en lisant `AssetController`/`PublicController` (core) plutôt que dans le code lui-même :
   `Asset::$uploadDir` et `Asset::$tempId` ne sont **pas des colonnes mappées** (simples propriétés
@@ -242,6 +250,14 @@ email. L'upload se fait à la sélection du fichier, pas à l'envoi du message :
   synchrone et plafonné à 500 lignes plutôt que branché sur le moteur d'import asynchrone natif de
   Mautic (`LeadBundle\Model\ImportModel`, pensé pour un assistant pas-à-pas + cron) — suffisant pour
   une liste de quelques centaines de contacts, largement le cas d'usage visé depuis le chat.
+  **Police** — au-delà de l'URL d'asset, `AttachmentManager::previewFont()` renvoie un exemple de
+  règle `@font-face` prêt à adapter (`format()` dérivé de l'extension, nom de famille dérivé du nom
+  de fichier) : contrairement à une image, une police ne s'utilise pas juste en collant une URL dans
+  un `src`. La note rappelle explicitement que ce n'est **pas une Google Font** (donc pas hébergée
+  par Google, aucune garantie de cache navigateur partagé) et prévient que le support de
+  `@font-face` en email est très inégal (Outlook desktop et la plupart des webmails l'ignorent
+  silencieusement — la police de repli s'applique alors, à toujours prévoir dans le CSS) ; fiable en
+  revanche sur une landing page, rendue par un vrai navigateur comme n'importe quel site.
 - **Mention côté modèle, pas côté affichage** — `ConversationManager::toMessages()` ajoute une note
   `[Pièce jointe : nom (type, id=N)]` au texte envoyé au modèle quand le message a des pièces
   jointes (`WittyMessage::$attachments`, relation `OneToMany` en mémoire, fonctionne même avant

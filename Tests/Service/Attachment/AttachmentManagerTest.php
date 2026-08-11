@@ -164,6 +164,36 @@ class AttachmentManagerTest extends TestCase
         );
     }
 
+    public function testUploadOfAFontIsDetectedAndStoredAsAnAssetLikeAnImage(): void
+    {
+        // Une police a besoin d'une URL stable et publique exactement comme
+        // une image (@font-face ne peut pas referencer un fichier de travail
+        // sous media/witty/uploads/) : meme chemin Asset, donc meme
+        // dependance a upload_dir que testUploadOfAnImageStoresTheFileWhereMauticWillLookForIt.
+        $uploadDir = $this->mediaDir.'/assets';
+        $manager   = $this->manager(['upload_dir' => $uploadDir]);
+
+        $attachment = $manager->upload($this->uploadedFile('Brand Sans.woff2', 'fake-woff2-bytes'));
+
+        $this->assertSame(WittyAttachment::KIND_FONT, $attachment->getKind());
+        $this->assertSame('woff2', $attachment->getExtension());
+        $this->assertFileExists($uploadDir.'/'.$attachment->getStoredFilename());
+    }
+
+    public function testFontPreviewExplainsHowToUseItAndWarnsAboutEmailSupport(): void
+    {
+        $manager    = $this->manager(['upload_dir' => $this->mediaDir.'/assets']);
+        $attachment = $manager->upload($this->uploadedFile('Brand Sans.woff2', 'fake-woff2-bytes'));
+
+        $preview = $manager->readPreview($attachment);
+
+        $this->assertSame(WittyAttachment::KIND_FONT, $preview['type']);
+        $this->assertStringContainsString("format('woff2')", $preview['css_example']);
+        $this->assertStringContainsString('Brand Sans', $preview['css_example']);
+        $this->assertStringContainsString('Google Font', $preview['note'], 'Ne pas laisser croire que c est une Google Font.');
+        $this->assertStringContainsString('Outlook', $preview['note'], 'Le support email inegal doit etre annonce.');
+    }
+
     public function testResolveThrowsWhenAttachmentDoesNotBelongToTheCurrentUser(): void
     {
         $repository = $this->createMock(WittyAttachmentRepository::class);
