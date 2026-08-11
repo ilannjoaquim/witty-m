@@ -229,7 +229,10 @@ class EntityCatalog
     }
 
     /**
-     * @param string $operation 'edit' ou 'delete'
+     * @param string $operation 'view', 'edit' ou 'delete' — n importe quel
+     *                          suffixe de permission Mautic standard
+     *                          (viewown/editown/deleteown...) fonctionne, la
+     *                          substitution est generique (voir MAP)
      */
     public function isAllowed(string $type, string $operation, ?object $entity): bool
     {

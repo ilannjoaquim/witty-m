@@ -20,12 +20,14 @@ use PHPUnit\Framework\TestCase;
 use Symfony\Component\HttpFoundation\File\UploadedFile;
 
 /**
- * Couvre le chemin tableur/texte (validation, detection de type, stockage sur
- * disque), qui ne touche aucun modele Mautic. Le chemin image/document (Asset
- * local, Asset::preUpload()/upload()) suit la meme convention que le reste du
- * plugin pour tout ce qui ecrit via un Model Mautic (cf. CreateAssetTool,
- * jamais unit-teste non plus) : verifie manuellement contre une instance
- * reelle, pas ici.
+ * Couvre surtout le chemin tableur/texte (validation, detection de type,
+ * stockage sur disque), qui ne touche aucun modele Mautic. Le chemin
+ * image/document ecrit via AssetModel::saveEntity() (mocke ici, comme
+ * CreateAssetTool ailleurs) reste verifie manuellement contre une instance
+ * reelle pour tout ce qui depend vraiment du modele — la persistance, la
+ * generation d'URL. L'ecriture physique du fichier, elle (Asset::upload()),
+ * n'a besoin d'aucun modele et se verifie ici : voir
+ * testUploadOfAnImageStoresTheFileWhereMauticWillLookForIt().
  */
 class AttachmentManagerTest extends TestCase
 {
@@ -119,6 +121,47 @@ class AttachmentManagerTest extends TestCase
         $manager->delete($attachment);
 
         $this->assertFileDoesNotExist($path);
+    }
+
+    public function testUploadOfAnImageDoesNotCrash(): void
+    {
+        // Asset::$tempId n'a pas de valeur par defaut (null). Sans
+        // Asset::setTempId() avant preUpload()/upload() — comme le fait
+        // toujours AssetController (core), meme hors upload par morceaux —
+        // Asset::upload() plante en sortie : getAbsoluteTempDir() renvoie null
+        // (tempId absent), passe tel quel a Filesystem::remove(), qui n'accepte
+        // plus null (TypeError). Chaque import d'image/document echouait donc
+        // purement et simplement avant meme la question de savoir ou le
+        // fichier atterrit (cf. testUploadOfAnImageStoresTheFileWhereMauticWillLookForIt).
+        $manager = $this->manager();
+
+        $attachment = $manager->upload($this->uploadedFile('photo.png', 'fake-png-bytes'));
+
+        $this->assertSame(WittyAttachment::KIND_IMAGE, $attachment->getKind());
+    }
+
+    public function testUploadOfAnImageStoresTheFileWhereMauticWillLookForIt(): void
+    {
+        // Asset::getUploadDir() retombe sur 'media/files' (chemin RELATIF,
+        // fige dans Mautic core) si personne n'appelle setUploadDir()
+        // explicitement avant preUpload()/upload(). C'est exactement ce que
+        // PublicController::localDownloadResponse() (core) fait avant de lire
+        // le fichier pour servir l'URL de l'asset : sans le meme appel ici,
+        // l'upload "reussit" sans erreur mais l'asset devient introuvable (404)
+        // des qu'on essaie de l'utiliser — upload_dir configure explicitement
+        // ici (different de mediaDir) pour que le test echoue si jamais
+        // AttachmentManager arretait d'appeler setUploadDir().
+        $uploadDir = $this->mediaDir.'/assets';
+        $manager   = $this->manager(['upload_dir' => $uploadDir]);
+
+        $attachment = $manager->upload($this->uploadedFile('photo.png', 'fake-png-bytes'));
+
+        $this->assertSame(WittyAttachment::KIND_IMAGE, $attachment->getKind());
+        $this->assertNotSame('', $attachment->getStoredFilename());
+        $this->assertFileExists(
+            $uploadDir.'/'.$attachment->getStoredFilename(),
+            'Le fichier doit atterrir dans upload_dir (celui que Mautic sert), pas dans un chemin relatif par defaut.',
+        );
     }
 
     public function testResolveThrowsWhenAttachmentDoesNotBelongToTheCurrentUser(): void

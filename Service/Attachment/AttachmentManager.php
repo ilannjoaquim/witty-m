@@ -249,8 +249,16 @@ class AttachmentManager
             $asset = $this->assetModel->getEntity($attachment->getAssetId());
 
             if ($asset instanceof Asset) {
-                // AssetSubscriber (core) supprime le fichier physique sur cet
-                // evenement, pas besoin de le faire nous-memes.
+                // Entite fraichement chargee depuis la base : uploadDir n'est
+                // jamais persiste (voir createLocalAsset()), donc de nouveau a
+                // zero ici. AssetSubscriber::onAssetDelete() supprime bien le
+                // fichier physique automatiquement (evenement ASSET_POST_DELETE,
+                // pas besoin de le faire nous-memes), mais via
+                // Asset::removeUpload() -> getAbsolutePath(), qui depend du meme
+                // getUploadDir() : sans ce rappel, il chercherait le fichier au
+                // mauvais endroit et ne supprimerait rien (silencieusement,
+                // fichier orphelin laisse sur disque).
+                $asset->setUploadDir((string) $this->coreParametersHelper->get('upload_dir'));
                 $this->assetModel->deleteEntity($asset);
             }
 
@@ -319,6 +327,28 @@ class AttachmentManager
         // sans collision (l'alias sert de repli si l'entite n'a pas d'uuid).
         $asset->setAlias(bin2hex(random_bytes(8)));
         $asset->setFile($file);
+        // uploadDir n'est PAS une colonne mappee (Entity/Asset.php:$uploadDir,
+        // simple propriete PHP) : sans cet appel, Asset::getUploadDir() retombe
+        // sur le defaut fige 'media/files' (chemin RELATIF, resolu au CWD du
+        // process PHP au moment du move() plus bas) au lieu du dossier reellement
+        // configure. Le fichier atterrit alors ailleurs que la ou
+        // PublicController::localDownloadResponse() ira le chercher pour servir
+        // l'URL (il refait le meme setUploadDir() avant de lire) : l'upload
+        // "reussit" sans erreur, mais l'asset resultant est introuvable (404) des
+        // qu'on essaie de l'utiliser. Meme appel que AssetController core avant
+        // tout preUpload()/upload().
+        $asset->setUploadDir((string) $this->coreParametersHelper->get('upload_dir'));
+        // tempId n'a pas de valeur par defaut (null) : AssetController (core) le
+        // renseigne toujours avant upload(), meme hors flux d'upload par morceaux
+        // (uniqid('tmp_') si le formulaire n'en a pas fourni). Sans lui,
+        // Asset::upload() plante en sortie (Filesystem::remove(null), l'appel
+        // getAbsoluteTempDir() renvoyant null) : chaque import d'image/document
+        // echouait purement et simplement, avant meme la question de savoir ou le
+        // fichier atterrit. Aucun repertoire temp n'est reellement cree par notre
+        // flux (pas de widget d'upload par morceaux) : ce tempId ne sert donc
+        // qu'a ce que le nettoyage de fin d'upload() trouve un chemin absent
+        // (no-op silencieux) plutot qu'un null qui fait planter Filesystem::remove().
+        $asset->setTempId(uniqid('tmp_', true));
         $asset->preUpload();
         $asset->upload();
 

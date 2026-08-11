@@ -220,6 +220,21 @@ email. L'upload se fait à la sélection du fichier, pas à l'envoi du message :
   dans un email") ; tableur/texte restent de simples fichiers de travail sous `media/witty/uploads/`,
   jamais publiés. Extension et taille validées contre une allowlist propre au plugin, plafonnée par
   la politique globale du site (`allowed_extensions`/`max_size`).
+  **Deux appels non documentés côté Mautic mais indispensables avant `preUpload()`/`upload()`**,
+  trouvés en lisant `AssetController`/`PublicController` (core) plutôt que dans le code lui-même :
+  `Asset::$uploadDir` et `Asset::$tempId` ne sont **pas des colonnes mappées** (simples propriétés
+  PHP, jamais persistées), donc toujours à zéro sur une entité fraîche, contrairement à ce qu'un
+  appel à `setFile()`/`preUpload()` laisserait penser. Sans `setUploadDir($coreParametersHelper->get('upload_dir'))` :
+  `Asset::getUploadDir()` retombe sur le défaut figé `'media/files'`, un chemin **relatif** résolu
+  au CWD du process PHP — le fichier atterrit ailleurs que là où `PublicController::localDownloadResponse()`
+  ira le chercher (il refait le même appel, avec la vraie valeur, avant de lire), l'upload
+  réussit sans erreur mais l'asset devient introuvable (404) dès qu'on l'utilise. Sans
+  `setTempId(uniqid('tmp_', true))` : `Asset::upload()` plante carrément en sortie
+  (`Filesystem::remove(getAbsoluteTempDir())`, qui renvoie `null` tant que `tempId` est absent —
+  `Filesystem::remove()` n'accepte plus `null` dans les versions récentes de Symfony) — chaque
+  import d'image/document échouait donc purement et simplement, avant même la question de savoir où
+  le fichier atterrit. Aucun répertoire temporaire n'est réellement créé par notre flux (pas de
+  widget d'upload par morceaux) : la valeur de `tempId` importe peu, seule sa présence compte.
 - **`read_attachment`** / **`import_leads_from_file`** (`Service/Tool/Tools/`) — l'agent inspecte
   une pièce jointe par son id avant d'agir : texte (contenu tronqué), tableur (en-têtes + aperçu via
   `Service/Attachment/SpreadsheetReader.php`, `phpoffice/phpspreadsheet`, déjà une dépendance
@@ -413,6 +428,8 @@ outils.
 |---|:---:|---|
 | `list_entities` | | Liste n'importe quel type du catalogue (voir ci-dessus) |
 | `update_entity` | ● | Renomme, décrit, (dé)publie un objet existant, tous types du catalogue ; `category_id` pour les types qui en portent une |
+| `read_entity_content` | | Lit le HTML actuel d'un email/page existant (mode code source uniquement) |
+| `update_entity_content` | ● | Remplace le HTML d'un email/page existant, en place — évite un delete+create pour la moindre retouche |
 | `delete_entity` | ● | Suppression définitive, tous types du catalogue |
 | `create_category` | ● | Catégorie Mautic rattachée à un type précis (bundle) : email, page, segment, campaign, form, asset, stage, point, dynamic_content, message, meet_room |
 | `list_email_templates` | | Templates d'email (section Witty > Templates) + consigne de rédaction de chaque emplacement |
@@ -465,7 +482,23 @@ outils.
 `update_entity` et `delete_entity` acceptent plusieurs types d'objets : leur permission ne peut
 donc pas être déclarée une fois pour toutes sur l'outil, elle est vérifiée **objet par objet**
 via `EntityCatalog::isAllowed()` (`hasEntityAccess`, own/other, ou permission plate pour project
-qui n'a pas de notion de propriétaire).
+qui n'a pas de notion de propriétaire). `read_entity_content`/`update_entity_content` réutilisent
+la même méthode avec l'opération `'view'`/`'edit'` — `isAllowed()` n'a rien de spécifique à
+edit/delete, n'importe quel suffixe de permission Mautic standard (`viewown`, `viewother`...)
+fonctionne puisque la substitution dans `EntityCatalog::MAP` est générique.
+
+**Modifier le contenu d'un email/page existant** — `update_entity` exclut volontairement le HTML
+(voir sa docblock) : avant `read_entity_content`/`update_entity_content`, la seule façon de changer
+le contenu d'un email ou d'une page déjà créé était de le supprimer et d'en recréer un autre, avec
+un nouvel id, en perdant ses statistiques et ses éventuelles références dans une campagne. Les deux
+outils ne fonctionnent qu'en **mode code source** (`template` égal à `''`, `'blank'` ou
+`'mautic_code_mode'`, celui que `create_email`/`create_landing_page` et les
+`create_*_from_template` utilisent systématiquement) : un email/page construit avec un thème
+visuel stocke son contenu bloc par bloc (`Email::getContent()`/`Page::getContent()`), pas dans un
+champ HTML unique — `read_entity_content` le signale (`code_mode: false` + `warning`) sans
+refuser de répondre, mais `update_entity_content` refuse d'écrire dans ce cas (`setCustomHtml()`
+n'aurait aucun effet sur le rendu réel). `PromptBuilder` pousse explicitement l'agent vers ce
+chemin plutôt que delete+create dès qu'un email/page existe déjà.
 
 **Categories** — contrairement aux autres types, la permission d'une catégorie dépend du *bundle*
 auquel elle appartient (`email:categories:create`, `page:categories:create`... plutôt qu'une
