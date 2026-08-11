@@ -27,6 +27,16 @@ use Psr\Log\LoggerInterface;
  * utile (ex. remplacer une URL de logo placeholder dans plusieurs emails
  * issus de create_email_from_template avant l'ajout d'update_entity_content).
  *
+ * Chaque appel remplace TOUTES les occurrences de `search` (str_replace est
+ * global), pas une seule : c'est ce qui rend cet outil capable d'une refonte
+ * visuelle COMPLETE d'un email/page en theme visuel/MJML, pas seulement d'une
+ * micro-retouche — le HTML compile par MJML repete ses styles en inline sur
+ * chaque element plutot que dans une seule feuille <style> centralisee
+ * (contrairement au mode code source), donc une refonte s'obtient en
+ * plusieurs appels d'affilee, un par valeur de design distincte (l'ancienne
+ * couleur -> la nouvelle, l'ancien font-family -> le nouveau, etc.), chacun
+ * touchant d'un coup toutes les occurrences de cette valeur dans le document.
+ *
  * Pour un email avec une source MJML enregistree (plugin GrapesJS,
  * Entity/GrapesJsBuilder, cf. l'historique de create_email_from_template) : le
  * meme remplacement est aussi applique a cette source, pour que le builder
@@ -54,11 +64,14 @@ class ReplaceEntityContentTextTool extends AbstractTool
 
     public function getDescription(): string
     {
-        return 'Remplace une chaine exacte (ex. une URL) dans le HTML d un email ou d une landing page existant, '
-            .'quel que soit son mode (code source ou theme visuel/MJML) — contrairement a update_entity_content, '
-            .'qui ne fonctionne qu en mode code source. Utile pour une retouche ponctuelle (ex. remplacer une URL de '
-            .'logo placeholder) sans reecrire tout le document. Appeler d abord read_entity_content pour verifier la '
-            .'chaine exacte a rechercher.';
+        return 'Remplace une chaine exacte (ex. une URL, une couleur, un font-family, un border-radius) dans le HTML '
+            .'d un email ou d une landing page existant, quel que soit son mode (code source ou theme visuel/MJML) — '
+            .'contrairement a update_entity_content, qui ne fonctionne qu en mode code source. Chaque appel remplace '
+            .'TOUTES les occurrences de la chaine. Utile pour une retouche ponctuelle (une URL, une date) mais aussi '
+            .'pour une refonte visuelle complete d un email/page en theme visuel/MJML : plusieurs appels d affilee, un '
+            .'par valeur de design distincte (couleur, police, rayon, espacement...), plutot qu un seul remplacement '
+            .'integral impossible dans ce mode. Appeler d abord read_entity_content pour reperer les chaines exactes '
+            .'a remplacer.';
     }
 
     public function isWriteOperation(): bool

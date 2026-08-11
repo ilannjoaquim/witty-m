@@ -446,7 +446,7 @@ outils.
 | `update_entity` | ● | Renomme, décrit, (dé)publie un objet existant, tous types du catalogue ; `category_id` pour les types qui en portent une |
 | `read_entity_content` | | Lit le HTML actuel d'un email/page existant, tous modes (avertit si theme visuel/MJML) |
 | `update_entity_content` | ● | Remplace le HTML d'un email/page existant en entier, en place — mode code source uniquement |
-| `replace_entity_content_text` | ● | Remplace une chaîne exacte (ex. une URL) dans le HTML d'un email/page — tous modes, y compris thème visuel/MJML |
+| `replace_entity_content_text` | ● | Remplace toutes les occurrences d'une chaîne exacte dans le HTML d'un email/page — tous modes ; plusieurs appels = refonte visuelle complète en thème visuel/MJML |
 | `delete_entity` | ● | Suppression définitive, tous types du catalogue |
 | `create_category` | ● | Catégorie Mautic rattachée à un type précis (bundle) : email, page, segment, campaign, form, asset, stage, point, dynamic_content, message, meet_room |
 | `list_email_templates` | | Templates d'email (section Witty > Templates) + consigne de rédaction de chaque emplacement |
@@ -529,16 +529,29 @@ rouvrant l'éditeur visuel/MJML (qui, lui, se base sur `Email::content`/la sourc
 `customHtml`, pour l'édition) — d'où `update_entity_content` qui refuse ce cas plutôt que de créer
 ce décalage silencieusement.
 
-`replace_entity_content_text` lève cette dernière limite pour une retouche **ponctuelle** (le cas
-d'usage réel qui a motivé son ajout : remplacer une URL de logo placeholder dans plusieurs emails
-déjà créés) : un remplacement chirurgical, contrairement à une réécriture intégrale, ne risque pas
-de désynchroniser l'éditeur visuel/MJML de façon significative. Pour un email avec une source MJML
-enregistrée (`Entity/GrapesJsBuilder`, table `bundle_grapesjsbuilder`, plugin GrapesJS — cf. le
-mécanisme historique de `create_email_from_template` avant qu'il ne passe au HTML pur), le même
-remplacement texte est aussi appliqué à cette source, pour que le builder MJML ne rouvre pas sur
-une version périmée. Best-effort et jamais bloquant : si le plugin GrapesJS est absent ou qu'aucune
-source n'existe pour cet email, `mjml_synced` vaut simplement `false` — le HTML réellement envoyé
-est de toute façon déjà corrigé à ce stade.
+`replace_entity_content_text` lève cette dernière limite pour un remplacement **chirurgical**
+(chaque appel remplace TOUTES les occurrences de `search`, pas une seule) : contrairement à une
+réécriture intégrale, il ne risque pas de désynchroniser l'éditeur visuel/MJML de façon
+significative. Le cas d'usage qui a motivé son ajout (remplacer une URL de logo placeholder dans
+plusieurs emails déjà créés) en suggérait un usage ponctuel, mais l'outil n'est pas limité à ça :
+**une refonte visuelle complète** d'un email/page en thème visuel/MJML s'obtient avec plusieurs
+appels d'affilée, un par valeur de design distincte (l'ancienne couleur de fond → la nouvelle,
+l'ancien `font-family` → le nouveau, l'ancien `border-radius` → le nouveau...) — le HTML compilé
+par MJML répète ses styles en inline sur chaque élément plutôt que dans une seule feuille `<style>`
+centralisée (contrairement au mode code source), donc pas de remplacement unique possible, mais
+rien n'empêche une dizaine d'appels ciblés d'aboutir au même résultat qu'un remplacement intégral.
+`PromptBuilder` guide maintenant explicitement l'agent vers cette méthode : la première version de
+cette consigne ne mentionnait qu'un usage "retouche ponctuelle", ce qui a fait dire à l'agent qu'une
+refonte de design complète était "impossible via l'API" pour ce type d'objet — une limite de
+consigne, pas de capacité réelle.
+
+Pour un email avec une source MJML enregistrée (`Entity/GrapesJsBuilder`, table
+`bundle_grapesjsbuilder`, plugin GrapesJS — cf. le mécanisme historique de
+`create_email_from_template` avant qu'il ne passe au HTML pur), le même remplacement texte est
+aussi appliqué à cette source, pour que le builder MJML ne rouvre pas sur une version périmée.
+Best-effort et jamais bloquant : si le plugin GrapesJS est absent ou qu'aucune source n'existe pour
+cet email, `mjml_synced` vaut simplement `false` — le HTML réellement envoyé est de toute façon déjà
+corrigé à ce stade.
 
 **Categories** — contrairement aux autres types, la permission d'une catégorie dépend du *bundle*
 auquel elle appartient (`email:categories:create`, `page:categories:create`... plutôt qu'une
