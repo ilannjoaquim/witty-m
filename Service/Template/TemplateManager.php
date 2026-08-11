@@ -87,6 +87,48 @@ class TemplateManager
         $this->entityManager->flush();
     }
 
+    /**
+     * Nettoie une liste de regles (une ligne = une regle) : partage entre
+     * CreateTemplateTool/UpdateTemplateTool (rules deja en tableau, cote agent)
+     * et Controller/TemplateController.php (texte multi-lignes cote UI,
+     * decoupe avant d'appeler ceci).
+     *
+     * @param array<int, mixed> $rules
+     *
+     * @return array<int, string>
+     */
+    public static function normalizeRules(array $rules): array
+    {
+        return array_values(array_filter(
+            array_map(static fn ($rule): string => trim((string) $rule), $rules),
+            static fn (string $rule): bool => '' !== $rule,
+        ));
+    }
+
+    /**
+     * Normalise (cle en majuscules) et valide les emplacements. Meme usage
+     * partage que normalizeRules().
+     *
+     * @param array<int, mixed> $placeholders
+     *
+     * @return array<int, array<string, mixed>>|string un message d erreur si un emplacement n a pas de cle
+     */
+    public static function normalizePlaceholders(array $placeholders): array|string
+    {
+        $normalized = [];
+
+        foreach ($placeholders as $placeholder) {
+            if (!is_array($placeholder) || '' === trim((string) ($placeholder['key'] ?? ''))) {
+                return 'Chaque emplacement doit avoir une cle (key).';
+            }
+
+            $placeholder['key'] = strtoupper(trim((string) $placeholder['key']));
+            $normalized[]       = $placeholder;
+        }
+
+        return $normalized;
+    }
+
     private function uniqueKey(string $type, string $base): string
     {
         $base = '' !== $base ? $base : 'template';

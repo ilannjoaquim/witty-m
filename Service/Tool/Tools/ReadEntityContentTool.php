@@ -102,9 +102,12 @@ class ReadEntityContentTool extends AbstractTool
 
         if (!$isCodeMode) {
             $result['warning'] = sprintf(
-                "Cet objet utilise le theme visuel '%s' : son rendu reel vient de blocs, pas uniquement du champ "
-                    .'html retourne ici, potentiellement incomplet ou perime. update_entity_content refusera de le '
-                    .'modifier ; passer par l editeur visuel de Mautic pour celui-ci.',
+                "Cet objet utilise le theme visuel '%s'. Le html retourne ici est neanmoins ce qui part reellement "
+                    .'au destinataire/visiteur (MailHelper::setEmail() ne retombe sur le rendu theme+blocs que si '
+                    .'le HTML enregistre est vide, un cas quasi inexistant). update_entity_content refusera un '
+                    .'remplacement integral (risque de desynchronisation avec l editeur visuel/MJML a la prochaine '
+                    .'ouverture) : pour une retouche ponctuelle (ex. une URL), utiliser replace_entity_content_text '
+                    .'a la place, qui fonctionne quel que soit le mode et synchronise la source MJML si elle existe.',
                 $template,
             );
         }

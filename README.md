@@ -428,14 +428,21 @@ outils.
 |---|:---:|---|
 | `list_entities` | | Liste n'importe quel type du catalogue (voir ci-dessus) |
 | `update_entity` | ● | Renomme, décrit, (dé)publie un objet existant, tous types du catalogue ; `category_id` pour les types qui en portent une |
-| `read_entity_content` | | Lit le HTML actuel d'un email/page existant (mode code source uniquement) |
-| `update_entity_content` | ● | Remplace le HTML d'un email/page existant, en place — évite un delete+create pour la moindre retouche |
+| `read_entity_content` | | Lit le HTML actuel d'un email/page existant, tous modes (avertit si theme visuel/MJML) |
+| `update_entity_content` | ● | Remplace le HTML d'un email/page existant en entier, en place — mode code source uniquement |
+| `replace_entity_content_text` | ● | Remplace une chaîne exacte (ex. une URL) dans le HTML d'un email/page — tous modes, y compris thème visuel/MJML |
 | `delete_entity` | ● | Suppression définitive, tous types du catalogue |
 | `create_category` | ● | Catégorie Mautic rattachée à un type précis (bundle) : email, page, segment, campaign, form, asset, stage, point, dynamic_content, message, meet_room |
 | `list_email_templates` | | Templates d'email (section Witty > Templates) + consigne de rédaction de chaque emplacement |
 | `create_email_from_template` | ● | Email construit à partir d'un template de la section Templates |
 | `list_page_templates` | | Templates de landing page (section Witty > Templates) + consigne de chaque emplacement |
 | `create_page_from_template` | ● | Landing page construite à partir d'un template, toujours en mode code source |
+| `create_template` | ● | Crée un template (email/page) dans la bibliothèque partagée — uniquement sur demande explicite, jamais spontané |
+| `update_template` | ● | Modifie un template existant (type + key), chaque champ fourni remplace l'existant en entier |
+| `delete_template` | ● | Supprime définitivement un template, `confirmed: true` obligatoire même hors mode confirmation |
+| `read_skill` | | Charge le contenu complet d'un skill (nom+description déjà dans le prompt système en permanence) |
+| `create_skill` | ● | Crée un skill (playbook/stratégie) dans la bibliothèque partagée — uniquement sur demande explicite |
+| `update_skill` | ● | Modifie un skill existant (identifié par son nom exact), chaque champ fourni remplace l'existant en entier |
 | `create_email` | ● | Email template ou list |
 | `create_email_variant` | ● | Variante de test A/B d'un email existant (vrai mécanisme Mautic, pas un second email indépendant) |
 | `create_landing_page` | ● | Landing page |
@@ -488,17 +495,34 @@ edit/delete, n'importe quel suffixe de permission Mautic standard (`viewown`, `v
 fonctionne puisque la substitution dans `EntityCatalog::MAP` est générique.
 
 **Modifier le contenu d'un email/page existant** — `update_entity` exclut volontairement le HTML
-(voir sa docblock) : avant `read_entity_content`/`update_entity_content`, la seule façon de changer
-le contenu d'un email ou d'une page déjà créé était de le supprimer et d'en recréer un autre, avec
-un nouvel id, en perdant ses statistiques et ses éventuelles références dans une campagne. Les deux
-outils ne fonctionnent qu'en **mode code source** (`template` égal à `''`, `'blank'` ou
-`'mautic_code_mode'`, celui que `create_email`/`create_landing_page` et les
-`create_*_from_template` utilisent systématiquement) : un email/page construit avec un thème
-visuel stocke son contenu bloc par bloc (`Email::getContent()`/`Page::getContent()`), pas dans un
-champ HTML unique — `read_entity_content` le signale (`code_mode: false` + `warning`) sans
-refuser de répondre, mais `update_entity_content` refuse d'écrire dans ce cas (`setCustomHtml()`
-n'aurait aucun effet sur le rendu réel). `PromptBuilder` pousse explicitement l'agent vers ce
-chemin plutôt que delete+create dès qu'un email/page existe déjà.
+(voir sa docblock) : avant `read_entity_content`/`update_entity_content`/`replace_entity_content_text`,
+la seule façon de changer le contenu d'un email ou d'une page déjà créé était de le supprimer et
+d'en recréer un autre, avec un nouvel id, en perdant ses statistiques et ses éventuelles références
+dans une campagne. `PromptBuilder` pousse explicitement l'agent vers ces outils plutôt que
+delete+create dès qu'un email/page existe déjà.
+
+`Email::customHtml`/`Page::customHtml` sont **toujours** ce qui part réellement au
+destinataire/visiteur, quel que soit `template` — vérifié dans `MailHelper::setEmail()` (core) :
+le rendu thème+blocs (`Email::getContent()`) n'est un repli que si `customHtml` est vide, un cas
+de compatibilité Mautic v1 devenu quasi inexistant. `read_entity_content` retourne donc toujours
+ce champ, avec un `warning` (pas un refus) si `template` n'est ni `''`, `'blank'` ni
+`'mautic_code_mode'` (thème visuel/MJML, celui que `create_email`/`create_landing_page`/
+`create_*_from_template` évitent systématiquement) : le HTML reflète bien ce qui est envoyé, mais
+un remplacement **intégral** de ce champ divergerait fortement de ce qu'un humain reverrait en
+rouvrant l'éditeur visuel/MJML (qui, lui, se base sur `Email::content`/la source MJML, pas sur
+`customHtml`, pour l'édition) — d'où `update_entity_content` qui refuse ce cas plutôt que de créer
+ce décalage silencieusement.
+
+`replace_entity_content_text` lève cette dernière limite pour une retouche **ponctuelle** (le cas
+d'usage réel qui a motivé son ajout : remplacer une URL de logo placeholder dans plusieurs emails
+déjà créés) : un remplacement chirurgical, contrairement à une réécriture intégrale, ne risque pas
+de désynchroniser l'éditeur visuel/MJML de façon significative. Pour un email avec une source MJML
+enregistrée (`Entity/GrapesJsBuilder`, table `bundle_grapesjsbuilder`, plugin GrapesJS — cf. le
+mécanisme historique de `create_email_from_template` avant qu'il ne passe au HTML pur), le même
+remplacement texte est aussi appliqué à cette source, pour que le builder MJML ne rouvre pas sur
+une version périmée. Best-effort et jamais bloquant : si le plugin GrapesJS est absent ou qu'aucune
+source n'existe pour cet email, `mjml_synced` vaut simplement `false` — le HTML réellement envoyé
+est de toute façon déjà corrigé à ce stade.
 
 **Categories** — contrairement aux autres types, la permission d'une catégorie dépend du *bundle*
 auquel elle appartient (`email:categories:create`, `page:categories:create`... plutôt qu'une
@@ -604,6 +628,21 @@ depuis une section dédiée de l'UI Mautic, pas livrés en fichiers : `Entity/Wi
 section Skills). Un template = un `type` (`email` ou `page`), une `key` (identifiant utilisé par
 l'agent, dérivée du nom si laissée vide), un `goal`/des `rules`/des `placeholders` (même structure
 que l'ancien `manifest.json`, en JSON) et un champ `html`.
+
+**L'agent peut aussi créer/modifier/supprimer un template lui-même** (`create_template` /
+`update_template` / `delete_template`, `Service/Tool/Tools/`) — exactement comme les 4 templates
+d'origine ont été produits : un humain fournit un email/page réel (ou un exemple) et demande à
+l'agent d'en extraire un template réutilisable, plutôt que d'écrire le HTML et le JSON des
+emplacements à la main. Ces trois outils touchent la bibliothèque **partagée par toute
+l'instance** — contrairement à un email/page ponctuel, un template devient une brique
+d'infrastructure que l'agent lui-même réutilisera ensuite pour tout email/page futur — d'où deux
+garde-fous supplémentaires : `PromptBuilder` interdit explicitement à l'agent de les appeler de sa
+propre initiative (uniquement sur demande explicite de l'utilisateur, jamais en marge de la
+rédaction d'un email ponctuel), et `delete_template` exige `confirmed: true` **même si le mode
+confirmation global est désactivé**, même règle que `delete_entity`/`manage_tags(delete)` (voir
+plus bas). `update_template`/`create_template`, eux, suivent le mode confirmation global comme le
+reste des outils d'écriture. Les trois identifient leur cible par `(type, key)`, jamais par id
+numérique — c'est tout ce que `list_email_templates`/`list_page_templates` exposent déjà à l'agent.
 
 **Le code est toujours du HTML final, y compris pour un email.** PHP ne sait pas compiler du
 MJML : le compilateur officiel tourne en Node (`dev/build-templates.sh`) ou, côté builder Mautic,

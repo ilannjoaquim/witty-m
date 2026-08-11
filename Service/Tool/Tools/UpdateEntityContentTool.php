@@ -17,11 +17,16 @@ use MauticPlugin\WittyBundle\Service\WittyConfig;
  * recreer un nouveau, avec un nouvel id, en perdant ses statistiques et ses
  * eventuelles references dans une campagne.
  *
- * Meme limite que read_entity_content : uniquement en mode code source
- * ('blank' / 'mautic_code_mode'). Un objet construit avec un theme visuel
- * est refuse plutot que silencieusement ignore, `setCustomHtml()` n'ayant
- * aucun effet sur son rendu reel dans ce mode (voir la docblock de
- * ReadEntityContentTool).
+ * Le remplacement integral n'est autorise qu'en mode code source ('blank' /
+ * 'mautic_code_mode'), pas parce que `setCustomHtml()` serait sans effet
+ * ailleurs (il a toujours un effet reel : `MailHelper::setEmail()` envoie
+ * `customHtml` dans tous les cas, theme ou non) mais parce qu'un remplacement
+ * INTEGRAL sur un objet construit avec un theme visuel/MJML risquerait de
+ * diverger fortement de ce que l'editeur visuel/MJML donnerait a voir a la
+ * prochaine ouverture (rendu depuis `content`/la source MJML, pas depuis
+ * `customHtml`). Un objet en theme visuel est donc refuse ici plutot que
+ * silencieusement accepte — voir replace_entity_content_text pour une
+ * retouche ponctuelle (ex. une URL), elle fonctionne quel que soit le mode.
  */
 class UpdateEntityContentTool extends AbstractTool
 {
@@ -98,8 +103,10 @@ class UpdateEntityContentTool extends AbstractTool
             return [
                 'status' => 'error',
                 'error'  => sprintf(
-                    "Cet objet utilise le theme visuel '%s' : update_entity_content ne fonctionne qu en mode code "
-                        .'source. Le modifier via l editeur visuel de Mautic.',
+                    "Cet objet utilise le theme visuel '%s' : un remplacement integral via update_entity_content "
+                        .'risquerait de desynchroniser le rendu de l editeur visuel/MJML a la prochaine ouverture. '
+                        .'Pour une retouche ponctuelle (ex. une URL de logo), utiliser replace_entity_content_text a '
+                        .'la place : il fonctionne quel que soit le mode et synchronise la source MJML si elle existe.',
                     $template,
                 ),
             ];
