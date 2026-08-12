@@ -92,6 +92,51 @@ class AuthType extends AbstractType
             ],
             'label_attr'   => ['class' => 'control-label'],
         ]);
+
+        // Prospeo (MCP) : meme logique que Bright Data, capacite facultative
+        // independante des fournisseurs IA.
+        $builder->add('prospeo_api_key', PasswordType::class, [
+            'label'        => 'mautic.witty.config.prospeo.api_key',
+            'required'     => false,
+            'always_empty' => false,
+            'attr'         => [
+                'class'        => 'form-control',
+                'autocomplete' => 'off',
+                'tooltip'      => 'mautic.witty.config.prospeo.api_key.tooltip',
+            ],
+            'label_attr'   => ['class' => 'control-label'],
+        ]);
+
+        // Apollo (API REST classique, cle API "utilisateur" — pas le serveur
+        // MCP, qui exige OAuth 2.0 cote "partenaire") : meme logique que
+        // Bright Data/Prospeo, capacite facultative independante des
+        // fournisseurs IA.
+        $builder->add('apollo_api_key', PasswordType::class, [
+            'label'        => 'mautic.witty.config.apollo.api_key',
+            'required'     => false,
+            'always_empty' => false,
+            'attr'         => [
+                'class'        => 'form-control',
+                'autocomplete' => 'off',
+                'tooltip'      => 'mautic.witty.config.apollo.api_key.tooltip',
+            ],
+            'label_attr'   => ['class' => 'control-label'],
+        ]);
+
+        // QuickEnrich (API REST, gratuite) : meme logique que Bright
+        // Data/Prospeo/Apollo, capacite facultative independante des
+        // fournisseurs IA.
+        $builder->add('quickenrich_api_key', PasswordType::class, [
+            'label'        => 'mautic.witty.config.quickenrich.api_key',
+            'required'     => false,
+            'always_empty' => false,
+            'attr'         => [
+                'class'        => 'form-control',
+                'autocomplete' => 'off',
+                'tooltip'      => 'mautic.witty.config.quickenrich.api_key.tooltip',
+            ],
+            'label_attr'   => ['class' => 'control-label'],
+        ]);
     }
 
     public function configureOptions(OptionsResolver $resolver): void

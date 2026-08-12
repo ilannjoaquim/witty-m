@@ -110,6 +110,87 @@ class WittyConfigTest extends TestCase
         $this->assertTrue($config->isBrightDataProModeEnabled());
     }
 
+    public function testProspeoIsIndependentFromAiProviderKeys(): void
+    {
+        // Meme raisonnement que Bright Data : une capacite de l agent, pas un
+        // fournisseur de modele.
+        $config = $this->configWith(true, ['prospeo_api_key' => 'ps-token-123']);
+
+        $this->assertTrue($config->isProspeoConfigured());
+        $this->assertSame('ps-token-123', $config->getProspeoApiKey());
+        $this->assertSame([], $config->getConfiguredProviders(), 'Prospeo n est pas un fournisseur de modele.');
+    }
+
+    public function testProspeoRequiresAPublishedIntegrationLikeOtherKeys(): void
+    {
+        $config = $this->configWith(false, ['prospeo_api_key' => 'ps-token-123']);
+
+        $this->assertFalse($config->isProspeoConfigured(), 'Un plugin desactive ne doit exposer aucune capacite, meme avec une cle presente.');
+    }
+
+    public function testApolloIsIndependentFromAiProviderKeys(): void
+    {
+        // Meme raisonnement que Bright Data/Prospeo : une capacite de l agent,
+        // pas un fournisseur de modele.
+        $config = $this->configWith(true, ['apollo_api_key' => 'apollo-token-123']);
+
+        $this->assertTrue($config->isApolloConfigured());
+        $this->assertSame('apollo-token-123', $config->getApolloApiKey());
+        $this->assertSame([], $config->getConfiguredProviders(), 'Apollo n est pas un fournisseur de modele.');
+    }
+
+    public function testApolloRequiresAPublishedIntegrationLikeOtherKeys(): void
+    {
+        $config = $this->configWith(false, ['apollo_api_key' => 'apollo-token-123']);
+
+        $this->assertFalse($config->isApolloConfigured(), 'Un plugin desactive ne doit exposer aucune capacite, meme avec une cle presente.');
+    }
+
+    public function testQuickenrichIsIndependentFromAiProviderKeys(): void
+    {
+        // Meme raisonnement que Bright Data/Prospeo/Apollo : une capacite de
+        // l agent, pas un fournisseur de modele.
+        $config = $this->configWith(true, ['quickenrich_api_key' => 'qe-token-123']);
+
+        $this->assertTrue($config->isQuickenrichConfigured());
+        $this->assertSame('qe-token-123', $config->getQuickenrichApiKey());
+        $this->assertSame([], $config->getConfiguredProviders(), 'QuickEnrich n est pas un fournisseur de modele.');
+    }
+
+    public function testQuickenrichRequiresAPublishedIntegrationLikeOtherKeys(): void
+    {
+        $config = $this->configWith(false, ['quickenrich_api_key' => 'qe-token-123']);
+
+        $this->assertFalse($config->isQuickenrichConfigured(), 'Un plugin desactive ne doit exposer aucune capacite, meme avec une cle presente.');
+    }
+
+    /**
+     * Contrairement a Bright Data/Prospeo/Apollo/QuickEnrich, data.gouv.fr
+     * n a pas de cle API (serveur public) : c est un simple interrupteur
+     * feature_settings qui gate la capacite, pas api_keys.
+     */
+    public function testDatagouvIsGatedByASwitchNotAKey(): void
+    {
+        $config = $this->configWith(true, [], ['datagouv_enabled' => true]);
+
+        $this->assertTrue($config->isDatagouvEnabled());
+        $this->assertSame([], $config->getConfiguredProviders(), 'data.gouv.fr n est pas un fournisseur de modele.');
+    }
+
+    public function testDatagouvDefaultsToDisabled(): void
+    {
+        $config = $this->configWith(true);
+
+        $this->assertFalse($config->isDatagouvEnabled());
+    }
+
+    public function testDatagouvRequiresAPublishedIntegrationLikeOtherCapabilities(): void
+    {
+        $config = $this->configWith(false, [], ['datagouv_enabled' => true]);
+
+        $this->assertFalse($config->isDatagouvEnabled(), 'Un plugin desactive ne doit exposer aucune capacite, meme l interrupteur active.');
+    }
+
     /**
      * @param array<string, string> $apiKeys
      * @param array<string, string> $featureSettings

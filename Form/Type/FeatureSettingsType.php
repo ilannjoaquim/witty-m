@@ -61,6 +61,7 @@ class FeatureSettingsType extends AbstractType
                 'daily_token_quota'     => 0,
                 'plugnmeet_server_url'  => '',
                 'brightdata_pro_mode'   => false,
+                'datagouv_enabled'      => false,
             ]);
         });
 
@@ -128,6 +129,13 @@ class FeatureSettingsType extends AbstractType
         $builder->add('brightdata_pro_mode', YesNoButtonGroupType::class, [
             'label' => 'mautic.witty.config.brightdata.pro_mode',
             'attr'  => ['tooltip' => 'mautic.witty.config.brightdata.pro_mode.tooltip'],
+        ]);
+
+        // data.gouv.fr (MCP) : pas de cle API (serveur public en lecture
+        // seule), donc pas de champ dans AuthType — juste cet interrupteur.
+        $builder->add('datagouv_enabled', YesNoButtonGroupType::class, [
+            'label' => 'mautic.witty.config.datagouv.enabled',
+            'attr'  => ['tooltip' => 'mautic.witty.config.datagouv.enabled.tooltip'],
         ]);
 
         // Affichage : logo et favicon personnalises. 'mapped' => false : ce sont

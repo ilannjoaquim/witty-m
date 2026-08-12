@@ -200,6 +200,307 @@ l'utilisateur) sans casser les outils Mautic locaux.
   ils passent uniquement par l'infrastructure Bright Data. `AuditLogger` les journalise comme
   n'importe quel autre outil.
 
+### Recherche de prospects B2B (Prospeo, MCP)
+
+Une clé API Prospeo (**Details**) donne à l'agent l'accès au [serveur MCP distant de
+Prospeo](https://prospeo.io/api-docs/mcp) — recherche et enrichissement de profils/entreprises B2B
+(`search_person`, `enrich_person`, `bulk_enrich_person`, `search_company`, `enrich_company`,
+`bulk_enrich_company`, `search_suggestions`, `get_account_info`). Même mécanique que Bright Data :
+`Service/Mcp/ProspeoMcpClient.php` implémente `McpClientInterface`, mêmes transport et poignée de
+main JSON-RPC 2.0 "Streamable HTTP" que `BrightDataMcpClient.php` (delibérément la même structure),
+outils découverts en direct et exposés sous `prospeo_<nom distant>`. Seule différence
+d'authentification : en-tête `X-KEY` (celui de l'API REST classique de Prospeo, réutilisé ici pour
+le serveur MCP faute de documentation précise sur ce point à l'écriture de ce client — à
+vérifier/ajuster dans `ProspeoMcpClient::send()` si besoin) plutôt que le jeton en query string de
+Bright Data.
+
+**Contrairement à Bright Data, ces outils seuls ne suffisent pas** : ils ne connaissent que
+Prospeo, jamais Mautic — `search_person`/`enrich_person` renvoient des profils, pas des contacts.
+`Service/Tool/Tools/BulkCreateContactsTool.php` (`bulk_create_contacts`) fait le pont : l'agent
+extrait lui-même, pour chaque profil retenu, les champs pertinents (email si révélé via
+`enrich_person`, prénom, nom, poste, entreprise, LinkedIn...) dans la forme générique attendue
+(alias de champ contact Mautic → valeur, comme `create_contact`), l'outil crée/met à jour les
+contacts (`LeadModel::setFieldValues()`/`saveEntity()`) et les rattache optionnellement à un
+segment existant (`segment_id`, `ListModel::addLead()` — un appel par contact, comme
+`manage_contact_segments`, `addLead()` n'acceptant qu'un seul lead à la fois côté Mautic).
+
+- **Pas d'email obligatoire, volontairement** — à la différence de `create_contact`/
+  `import_leads_from_file`, un contact peut n'avoir aucun email : `search_person` seul (avant tout
+  appel à `enrich_person`) ne renvoie jamais l'email ni le mobile (obfusqués, révélés uniquement via
+  l'enrichissement, à son propre coût en crédits). Le dédoublonnage par email ne s'applique qu'aux
+  entrées qui en fournissent un ; les autres sont toujours créées, jamais fusionnées entre elles
+  faute de clé fiable.
+- **Plafonné à 500 contacts par appel** (`BulkCreateContactsTool::MAX_CONTACTS`), même logique que
+  `import_leads_from_file` — au-delà, plusieurs appels plutôt qu'un import synchrone déraisonnable.
+- **Coût en crédits** — `search_person` facture 1 crédit par page de 25 résultats même sans
+  enrichissement ; `enrich_person` facture en plus pour révéler email/mobile. `PromptBuilder` rappelle
+  explicitement à l'agent de s'arrêter au nombre de contacts demandé plutôt que de paginer au-delà.
+- **Sécurité** — permission `lead:leads:create` (même gate que `create_contact`), flux de
+  confirmation standard (aperçu : nombre de contacts valides/invalides, segment ciblé, échantillon).
+  Les outils `prospeo_*` eux-mêmes ne touchent jamais Mautic (comme `brightdata_*`) ; seul
+  `bulk_create_contacts` écrit, et c'est un outil Mautic local classique, pas un relais MCP.
+
+### Enrichissement B2B (Apollo, API REST)
+
+Une clé API Apollo (**Details**) donne à l'agent l'accès à l'API REST classique d'Apollo
+(`https://api.apollo.io/api/v1`, en-tête `x-api-key`) — **pas** son serveur MCP hébergé
+(`https://mcp.apollo.io/mcp`), qui exige une authentification OAuth 2.0 "partenaire" (inscription
+d'une app OAuth auprès d'Apollo, flux de consentement navigateur, jetons à rafraîchir) — un chantier
+sans commune mesure avec les autres intégrations du plugin, et hors scope ici. `Service/Apollo/ApolloClient.php`
+est donc un client REST classique (comme les fournisseurs LLM, `Symfony\Contracts\HttpClient\HttpClientInterface`),
+pas un `McpClientInterface`.
+
+**Portée volontairement réduite à l'enrichissement, décidée avec l'utilisateur avant l'implémentation** :
+- **Pas de recherche** (`People Search`/`Organization Search`) — jugée inutile et coûteuse pour ce
+  cas d'usage, jamais intégrée.
+- **Aucun outil Apollo Contacts/Accounts/Deals/Lists/Sequences/Tasks/Emails** — contrairement au
+  serveur MCP d'Apollo (qui expose une cinquantaine d'actions, y compris créer des séquences ou
+  envoyer des emails *depuis Apollo*), seuls 4 endpoints d'enrichissement existent côté plugin. Ce
+  n'est pas un filtrage a posteriori d'une liste plus large : ces outils n'existent tout simplement
+  pas dans le code, aucun risque que l'agent confonde Mautic et Apollo ou modifie quoi que ce soit
+  côté Apollo.
+- **`reveal_personal_emails` (synchrone) est câblé sur `enrich_person`/`bulk_enrich_people`** — le
+  reveal téléphone et l'enrichissement "waterfall" (sources en cascade), tous deux asynchrones par
+  nature côté Apollo, ont leur propre intégration dédiée : voir [Enrichissement approfondi
+  (Apollo waterfall)](#enrichissement-approfondi-apollo-waterfall-asynchrone) ci-dessous.
+
+| Outil | Endpoint Apollo | Limite |
+|---|---|---|
+| `enrich_person` | `GET /people/match` | 1 profil, 1-9 crédits si trouvé |
+| `bulk_enrich_people` | `POST /people/bulk_match` | 10 profils/appel |
+| `enrich_company` | `GET /organizations/enrich` | 1 entreprise, 1 crédit si trouvée |
+| `bulk_enrich_companies` | `POST /organizations/bulk_enrich` | 10 entreprises/appel |
+
+**`Service/Apollo/ApolloResponseTrimmer.php`** — une réponse Apollo brute est énorme (champs CRM
+internes type `salesforce_id`, dizaines de champs toujours vides par poste d'`employment_history`,
+technologies détaillées, événements de levée de fonds...) : inutile et coûteux en tokens à renvoyer
+tel quel au modèle. Chaque outil ne renvoie que les champs directement exploitables :
+
+- identité/coordonnées de base (poste, entreprise, localisation, email si révélé côté personne ;
+  industrie, taille, revenu, siège côté entreprise) ;
+- **qualification** — `seniority`/`departments`/`subdepartments`/`functions`, et
+  `employment_history` allégé à poste/entreprise/dates/poste-actuel par entrée (le reste — degré,
+  matière, adresse brute... — est systématiquement vide dans les réponses observées) : c'est ce qui
+  permet de répondre à "je veux les contacts avec plus de 5 ans d'expérience", déductible des dates
+  plutôt que d'un champ direct ;
+- **réseaux sociaux et site**, personne ET entreprise employeuse (`linkedin_url`/`twitter_url`/
+  `facebook_url`, `organization_linkedin_url`/`organization_twitter_url`/`organization_facebook_url`
+  côté personne, mêmes champs à plat côté `enrich_company`) — pas des champs contact standards de
+  Mautic, mais rien n'empêche l'utilisateur de les mapper vers des champs personnalisés.
+
+Comme pour Prospeo, c'est l'agent qui extrait lui-même les champs pertinents pour
+`bulk_create_contacts` — aucun renommage vers les alias Mautic n'est fait ici, pour ne pas coupler
+cette intégration au schéma de champs d'une instance Mautic précise.
+
+- **Pas de flux de confirmation dédié** — comme pour les outils `prospeo_*`/`brightdata_*`,
+  l'enrichissement ne touche jamais Mautic (donc pas de `isWriteOperation()`), seul
+  `bulk_create_contacts` en aval déclenche la confirmation standard. Le coût réel (crédits Apollo)
+  est rappelé dans `PromptBuilder` plutôt que gaté techniquement, même choix que pour `search_person`
+  de Prospeo.
+
+### Enrichissement approfondi (Apollo waterfall, asynchrone)
+
+Complète l'enrichissement Apollo classique (ci-dessus) avec le "waterfall" — des sources
+supplémentaires en cascade, plus complet mais plus cher, pour révéler l'email et/ou le téléphone
+d'un profil quand `enrich_person` seul ne suffit pas
+([doc Apollo](https://docs.apollo.io/docs/enrich-phone-and-email-using-data-waterfall)). Utilise la
+même clé API Apollo (**Details**) que le reste de l'intégration — rien de plus à configurer.
+
+**Choix explicite du mode, jamais deviné** — `enrich_person_waterfall` exige un argument `mode`
+obligatoire (`email`, `phone` ou `both`), sans valeur par défaut : `PromptBuilder` instruit l'agent
+de le déduire STRICTEMENT de la demande de l'utilisateur ("trouve son email" = `email` seul, "son
+numéro" = `phone` seul, "enrichis-le complètement" = `both`), jamais `both` par défaut faute de
+précision, le coût en crédits Apollo différant fortement selon le choix (un mode mal choisi facture
+pour une donnée que personne n'a demandée). Techniquement, `mode` pilote deux paramètres
+indépendants côté Apollo : `run_waterfall_email`/`run_waterfall_phone`.
+
+**Asynchrone par nature côté Apollo — c'est ce qui structure toute cette intégration :**
+l'appel initial (`GET /people/match` avec `run_waterfall_email`/`run_waterfall_phone`/`webhook_url`)
+répond immédiatement mais SANS l'email/le téléphone, seulement un `request_id` et un statut
+`accepted`/`failed`. Le résultat réel arrive plus tard (parfois plusieurs minutes) via un `POST`
+d'Apollo sur `webhook_url`. Trois pièces travaillent ensemble pour couvrir cet écart :
+
+- **`enrich_person_waterfall`** — lance la demande. Accepte soit `contact_id` (contact Mautic
+  existant, ses champs email/nom/entreprise servent d'identifiants par défaut), soit des identifiants
+  bruts (comme `enrich_person`). Si acceptée par Apollo (`waterfall.status=accepted`), persiste une
+  ligne `WittyApolloWaterfallRequest` (`status=pending`) et renvoie le `request_id` à l'agent — jamais
+  la valeur elle-même, qui n'existe pas encore à ce stade.
+- **`Controller/ApolloWaterfallWebhookController.php`** (route publique, hors du firewall comme
+  `witty_meet_join`/`witty_meet_slots_availability`) — reçoit le `POST` d'Apollo, retrouve la ligne
+  correspondante via `request_id` (seule clé de corrélation commune aux deux appels), et la marque
+  `completed` (résultat trimé par `Service/Apollo/ApolloWaterfallPayloadParser.php`, classe à part
+  pour rester testable sans booter le framework) ou `failed`. Idempotent par construction : un webhook
+  livré deux fois (retry Apollo) réécrit simplement les mêmes champs.
+- **`check_waterfall_enrichment`** — permet à l'agent de récupérer le résultat sur un tour ultérieur
+  (le `request_id` n'a aucune chance de survivre en mémoire du modèle d'un tour à l'autre sans être
+  répété par l'utilisateur). Trois entrées possibles : `request_id` pour une demande précise,
+  `contact_id` pour l'historique d'un contact, ou aucun des deux pour les demandes récentes de
+  l'utilisateur courant (`WittyApolloWaterfallRequestRepository::findRecentForUser()`, scopé comme
+  `WittyAttachment` — le détail d'une demande n'a pas à être visible par un autre compte).
+
+**Sécurité du webhook** — l'URL porte un jeton (`/witty/apollo/waterfall/webhook/{token}`,
+`WittyConfig::getApolloWebhookToken()`, comparé en temps constant via `hash_equals()`) pour empêcher
+un tiers qui devinerait le chemin de POSTer un faux résultat qu'un agent relaierait ensuite comme
+fiable. Dérivé par hash de la clé API Apollo elle-même plutôt que d'un secret stocké à part : rien de
+supplémentaire à générer ni à retenir, et il change automatiquement si la clé change — pas un secret
+cryptographique protégeant un accès direct (seul le contrôleur le vérifie, en lecture seule pour
+l'extérieur), une troncature de SHA-256 suffit face à ce risque.
+
+**Aucune écriture automatique sur le contact** — volontairement, ni `enrich_person_waterfall` ni le
+contrôleur webhook ne modifient jamais un contact Mautic : le webhook peut arriver hors de toute
+conversation active (rien à faire confirmer à personne à ce moment-là). Une fois le résultat récupéré
+via `check_waterfall_enrichment`, c'est l'agent qui appelle `update_contact` pour l'enregistrer — donc
+avec le flux de confirmation standard, comme n'importe quelle autre écriture.
+
+### Recherche de contacts gratuite (QuickEnrich, API REST)
+
+Une clé API QuickEnrich (**Details**) donne à l'agent l'accès à `quickenrich_search_contacts`
+(`POST /employees/contact-finder`) — une recherche par filtres dans la base externe de QuickEnrich,
+**gratuite** (`credits_used` toujours `0`), contrairement à Prospeo/Apollo dont la recherche a été
+jugée trop coûteuse pour être intégrée. `Service/Quickenrich/QuickenrichClient.php` suit le même
+principe que `ApolloClient.php` (client REST classique, `Symfony\Contracts\HttpClient\HttpClientInterface`),
+avec sa propre méthode d'authentification : jeton `Authorization: Bearer` — un troisième schéma
+différent de Prospeo (`X-KEY`) et Apollo (`x-api-key`), aucune convention commune entre fournisseurs
+à réutiliser d'un client à l'autre.
+
+**Nom du tool délibérément préfixé `quickenrich_`** — contrairement aux outils Apollo, celui-ci
+recherche des contacts dans une base externe, exactement ce que fait déjà `search_contacts` (parmi
+les contacts *déjà dans Mautic*) : sans préfixe, la collision de nom aurait été le pire cas de
+confusion Mautic/fournisseur externe possible dans tout le plugin. `PromptBuilder` le rappelle
+explicitement en plus du nom.
+
+- **Endpoint de découverte uniquement** — jamais d'email/téléphone en clair dans la réponse,
+  seulement `has_email`/`has_phone` (la donnée existe en base ou non). Révéler la valeur d'un
+  contact déjà identifié se fait ensuite via `quickenrich_find_employee_email`
+  (`GET /employees/search`) ou `quickenrich_find_employee_phone` (`GET /employees/phone-search`) —
+  soit `linkedin_url` seul, soit le trio `company_url`+`first_name`+`last_name` (si les 4 sont
+  fournis, QuickEnrich essaie `linkedin_url` en premier puis retombe sur le trio). `found: false`
+  si rien n'est trouvé (`data` vide côté API), sinon `employee` avec les champs renvoyés tels quels
+  (peu d'intérêt à les trimmer : la réponse QuickEnrich est déjà plate et courte, contrairement à
+  Apollo). Le téléphone facture **1 crédit uniquement s'il est trouvé** (rien n'est déduit en cas
+  d'échec) ; l'email n'a pas cette précision dans la doc, non supposée ici. `PromptBuilder` rappelle
+  de n'appeler ces deux outils que sur un contact réellement retenu, jamais en boucle sur toute une
+  liste par défaut, pour ne pas cramer des crédits inutilement.
+- **`quickenrich_list_filter_values`** — cinq dimensions (`country_code`, `industry_linkedin`,
+  `number_of_employees`, `revenue`, `services`) exigent une chaîne exacte issue des endpoints de
+  référence publics de QuickEnrich (`GET /lookups/*`, aucune clé requise côté QuickEnrich, mais même
+  verrou `isQuickenrichConfigured()` que le reste par cohérence) — une valeur hors liste y renvoie
+  une erreur. Cet outil relaie ces cinq endpoints, paramétré par `dimension`. Les six autres
+  dimensions (`title`, `locality`, `company_name`, `company_url`, `city`, `bio_li`) sont du texte
+  libre. La doc montre les endpoints de référence renvoyant un tableau JSON brut
+  (`["US", "GB", ...]`), pas la même enveloppe `{data: [...]}` que la recherche elle-même : l'outil
+  gère les deux formes sans lever d'hypothèse fausse sur l'une ou l'autre.
+- **Au moins un filtre obligatoire** — un `include`/`exclude` non vide sur une dimension, ou
+  `has_email`/`has_phone` à `true` ; validé côté plugin avant même d'appeler QuickEnrich (message
+  clair immédiat plutôt qu'un aller-retour réseau pour rien). Les dimensions à `include`/`exclude`
+  tous deux vides ne sont jamais envoyées, pour ne pas compter par erreur comme un filtre actif côté
+  API.
+- **Limite de débit** — 120 requêtes/minute par clé API, seulement rappelée dans la description de
+  l'outil (pas de limitation technique côté plugin, comme pour le coût en crédits Apollo).
+
+### Données publiques (data.gouv.fr, MCP)
+
+Un interrupteur **Fonctionnalités** (pas de clé API) donne à l'agent l'accès au [serveur MCP officiel
+de data.gouv.fr](https://guides.data.gouv.fr/intelligence-artificielle/le-serveur-mcp-de-data.gouv.fr)
+— recherche et consultation des jeux de données publiques françaises : `search_datasets`,
+`get_dataset_info`, `list_dataset_resources`, `get_resource_info`, `query_resource_data`,
+`download_and_parse_resource`, `search_dataservices`, `get_dataservice_info`,
+`get_dataservice_openapi_spec`, `get_metrics`. Même mécanique que Bright Data/Prospeo :
+`Service/Mcp/DatagouvMcpClient.php` implémente `McpClientInterface`, mêmes transport et poignée de
+main JSON-RPC 2.0 "Streamable HTTP" (deliberement la même structure que
+`BrightDataMcpClient.php`/`ProspeoMcpClient.php`), outils découverts en direct et exposés sous
+`datagouv_<nom distant>`.
+
+**Seule intégration MCP du plugin sans authentification** — le serveur est public et documenté
+"no API key required (read-only tools)" : `getConfigured()` n'existe donc pas côté data.gouv.fr,
+`Service/Mcp/DatagouvMcpClient::send()` n'envoie aucun en-tête d'auth (ni `X-KEY` comme Prospeo, ni
+`Authorization` comme QuickEnrich, ni jeton en query string comme Bright Data). Ce qui gate
+l'activation est un simple interrupteur (`WittyConfig::isDatagouvEnabled()`, réglage
+`feature_settings['datagouv_enabled']`, onglet **Fonctionnalités** — pas **Details**, puisqu'il n'y
+a aucun secret à saisir) : sans lui, l'agent n'a accès à rien de nouveau malgré l'absence de clé,
+pour garder le choix de l'exposer ou non.
+
+- **Lecture seule, zéro risque de confusion Mautic** — la doc officielle ne documente que des outils
+  de consultation (recherche, requêtage tabulaire, téléchargement), rien qui écrit. Contrairement à
+  Prospeo/Apollo/QuickEnrich, il n'y a aucun pont vers `bulk_create_contacts` ni aucun autre outil
+  Mautic : un jeu de données ou une API trouvée ici reste un objet data.gouv.fr, jamais un objet
+  Mautic, donc rien à rattacher à un segment ou une campagne.
+- **Marqué expérimental par data.gouv.fr lui-même** — la doc officielle prévient que les réponses en
+  langage naturel "may be incomplete, incorrect or include hallucinations" et recommande les API
+  structurées classiques de data.gouv.fr pour un usage sérieux. `PromptBuilder` relaie cette réserve :
+  l'agent doit recouper les chiffres avant de les présenter comme fiables, surtout s'ils doivent finir
+  dans un email ou un contenu envoyé à des contacts.
+- **Sécurité** — ces outils ne touchent jamais Mautic (pas de permission, pas d'écriture en base) :
+  `AuditLogger` les journalise comme n'importe quel autre outil, même si le risque qu'ils modifient
+  quoi que ce soit est nul par construction (aucun outil d'écriture côté source).
+
+### Traitement en masse (jobs de fond)
+
+`AgentRunner::run()` tourne entièrement dans une seule requête HTTP (streaming SSE ou non), bornée
+par `max_iterations` (8 par défaut, 20 max) : un enrichissement Apollo sur un segment de 10 000 ou
+50 000 contacts représenterait des milliers d'appels API, largement au-delà de ce qu'un seul tour de
+chat peut absorber — pas un problème de timeout à augmenter (chaque appel HTTP a déjà le sien,
+30-120 s selon le client), un problème de **volume structurel**. Plutôt que de patcher chaque outil
+concerné séparément, ce mécanisme est générique et partagé par toutes les intégrations bulk-capables
+(Apollo, QuickEnrich, Prospeo, data.gouv.fr) — même esprit que `ToolInterface`/`McpClientInterface`,
+une classe taguée = une capacité de plus, rien à câbler ailleurs.
+
+- **`Entity/WittyBackgroundJob.php`** — un job (`type`, `status` queued/running/completed/failed/
+  cancelled, `params` figés à la création, `resumeCursor` que chaque handler avance à son rythme,
+  compteurs `processedItems`/`succeededItems`/`failedItems`). Nommé `resumeCursor` et pas simplement
+  `cursor` : `CURSOR` est un mot réservé SQL, un nom de colonne littéral l'aurait exigé quoté dans
+  chaque requête générée par Doctrine.
+- **`Entity/WittyBackgroundJobItem.php`** — un élément traité (`external_ref`, `data` en attente de
+  revue). Table séparée du job plutôt qu'un unique JSON géant sur `WittyBackgroundJob` : à l'échelle
+  de 50 000 éléments, impossible à paginer sinon (`list_bulk_job_items` doit pouvoir en montrer 50 à
+  la fois, pas les 50 000 d'un coup — budget de contexte du modèle).
+- **`Service/Job/JobHandlerInterface.php`** — `getType()` + `processChunk(WittyBackgroundJob $job)`,
+  taggué `witty.job_handler` (auto-enregistré comme `witty.tool`/`witty.mcp_client`).
+  `processChunk()` traite un lot borné (quelques dizaines d'éléments, une poignée d'appels API),
+  avance `resumeCursor`, et bascule `status=completed` quand il n'y a plus rien à faire. Trois
+  implémentations aujourd'hui :
+  - **`ApolloBulkEnrichPeopleJobHandler`** (`apollo_bulk_enrich_people`) — 10 contacts par lot
+    (plafond `POST /people/bulk_match`), parcourt `lead_lists_leads` par `lead_id` croissant plutôt
+    que par offset/limite classique (reste correct même si la composition du segment change en cours
+    de route). Corrélation Apollo↔contact **positionnelle** (la réponse ne renvoie aucune clé de
+    corrélation) : si le nombre de résultats ne correspond pas au nombre envoyé, le job échoue
+    explicitement plutôt que de risquer une mauvaise attribution.
+  - **`QuickenrichBulkSearchJobHandler`** (`quickenrich_bulk_search_contacts`) — pagine
+    `POST /employees/contact-finder` (100/page) jusqu'à `target_count` ou épuisement (page
+    incomplète = fin réelle des résultats, termine même sous la cible).
+  - **`McpBulkSearchJobHandler`** (`mcp_bulk_search`) — **un seul handler générique pour Prospeo ET
+    data.gouv.fr** (n'importe quel futur serveur MCP inclus), plutôt qu'un par fournisseur.
+    Contrairement à Apollo/QuickEnrich (clients REST que ce plugin écrit et contrôle, schéma de
+    pagination connu avec certitude), un outil MCP découvert en direct a un schéma défini par SON
+    fournisseur : plutôt que deviner le nom du paramètre de pagination (`page` ? `offset` ? autre
+    chose), c'est `start_bulk_mcp_search` qui le fait fournir explicitement par l'agent (qui, lui,
+    voit le schéma réel via la liste d'outils) — `page_argument`, `page_start`, `page_step`,
+    `items_field` (où trouver le tableau de résultats dans la réponse, forme différente d'un outil à
+    l'autre).
+- **`Command/ProcessBackgroundJobsCommand.php`** (`witty:jobs:process`) — à planifier via le cron
+  système comme `witty:meet:reconcile-attendance` (Mautic n'a pas d'ordonnanceur interne), idéalement
+  chaque minute. Borné en **temps** (50 s) plutôt qu'en nombre de jobs : même avec beaucoup de jobs en
+  attente, une exécution reste courte et prévisible, jamais de quoi chevaucher le passage suivant.
+  Aucun verrou explicite (comme les autres `Command/` de ce plugin) : un chevauchement re-traiterait
+  au pire un lot déjà fait, jamais de corruption.
+- **`start_apollo_bulk_enrich_people`/`start_quickenrich_bulk_search`/`start_bulk_mcp_search`** — un
+  outil de déclenchement par intégration (schéma typé, propre à chacune) plutôt qu'un unique outil
+  générique à paramètres libres : plus fiable pour un modèle de tool-calling qu'un `params: object`
+  fourre-tout. Aucun ne renvoie de résultat directement, seulement un `job_id`.
+- **`check_bulk_job`/`list_bulk_job_items`** — génériques, partagés par les trois intégrations
+  (même principe que `check_waterfall_enrichment`). Scope par utilisateur créateur (comme
+  `WittyAttachment`) : un `job_id` d'un autre compte est traité comme introuvable.
+- **Aucune écriture automatique sur un contact Mautic** — un résultat de job est une donnée en
+  ATTENTE de revue (`list_bulk_job_items`), jamais appliquée d'elle-même : c'est l'agent qui, sur
+  demande, appelle `update_contact`/`bulk_create_contacts` pour l'enregistrer, avec le flux de
+  confirmation standard. Même raisonnement que le waterfall Apollo, pour la même raison — un webhook
+  ou un passage de cron n'a jamais personne pour valider quoi que ce soit au moment où il s'exécute.
+- **Vérifié contre une vraie base MySQL locale** (pas seulement des doublures) — la requête DQL
+  d'`ApolloBulkEnrichPeopleJobHandler` (parcours de `lead_lists_leads`, exclusion des membres
+  `manually_removed=1`, corrélation positionnelle, reprise depuis un curseur) a été exécutée pour de
+  vrai contre un segment et des contacts réels dans cette session, données de test nettoyées ensuite
+  sans toucher aux données existantes.
+
 ### Pièces jointes (docs, tableurs, images, polices)
 
 Un bouton trombone dans le chat permet de joindre un fichier (image, CSV/XLS/XLSX, texte, PDF/
@@ -461,14 +762,33 @@ outils.
 | `update_skill` | ● | Modifie un skill existant (identifié par son nom exact), chaque champ fourni remplace l'existant en entier |
 | `create_email` | ● | Email template ou list |
 | `create_email_variant` | ● | Variante de test A/B d'un email existant (vrai mécanisme Mautic, pas un second email indépendant) |
+| `update_email_settings` | ● | Modifie les réglages d'un email déjà créé hors contenu/nom/publication : expéditeur, subject, preheader, UTM, texte brut, fenêtre de publication |
 | `create_landing_page` | ● | Landing page |
 | `send_test_email` | ● | Exemplaire de test, aucun contact touché |
 | `create_form` | ● | Formulaire + champs, avec mapping vers les champs contact |
+| `read_form` | | Détail complet d'un formulaire existant (champs avec alias, actions avec id) — préalable à update_form |
+| `update_form` | ● | Ajoute/modifie/supprime des champs et des actions d'un formulaire déjà créé, un par un (op=add\|update\|remove) |
 | `create_segment` | ● | Segment + filtres |
 | `search_contacts` | | Recherche de contacts |
 | `create_contact` | ● | Contact (refuse le doublon d'email) |
 | `update_contact` | ● | Champs d'un contact existant, id ou email |
 | `manage_contact_segments` | ● | Ajoute/retire un contact d'un ou plusieurs segments |
+| `bulk_create_contacts` | ● | Crée/met à jour jusqu'à 500 contacts d'un coup (ex. depuis une recherche `prospeo_*`/un enrichissement Apollo) et les rattache à un segment |
+| `enrich_person` | | Enrichit un profil via Apollo (titre, entreprise, email si `reveal_personal_emails`) |
+| `bulk_enrich_people` | | Enrichit jusqu'à 10 profils via Apollo en un appel |
+| `enrich_company` | | Enrichit une entreprise via Apollo (industrie, taille, technologies) |
+| `bulk_enrich_companies` | | Enrichit jusqu'à 10 entreprises via Apollo en un appel |
+| `enrich_person_waterfall` | | Lance un enrichissement Apollo approfondi (email et/ou téléphone selon `mode`) — asynchrone, renvoie un `request_id` |
+| `check_waterfall_enrichment` | | Récupère le résultat d'un `enrich_person_waterfall` (par `request_id`, `contact_id`, ou historique récent) |
+| `quickenrich_search_contacts` | | Recherche de contacts dans la base externe QuickEnrich (gratuite), pas dans Mautic |
+| `quickenrich_list_filter_values` | | Valeurs exactes acceptées par une dimension à correspondance stricte de la recherche QuickEnrich |
+| `quickenrich_find_employee_email` | | Révèle l'email d'un employé déjà identifié via QuickEnrich |
+| `quickenrich_find_employee_phone` | | Révèle le téléphone d'un employé déjà identifié via QuickEnrich (1 crédit si trouvé) |
+| `start_apollo_bulk_enrich_people` | | Lance en arrière-plan un enrichissement Apollo sur tous les contacts d'un segment |
+| `start_quickenrich_bulk_search` | | Lance en arrière-plan une recherche QuickEnrich paginée jusqu'à `target_count` résultats |
+| `start_bulk_mcp_search` | | Lance en arrière-plan la pagination d'un outil MCP (Prospeo, data.gouv.fr) |
+| `check_bulk_job` | | Consulte la progression d'un job de fond |
+| `list_bulk_job_items` | | Récupère une page de résultats d'un job de fond, à revoir avant application |
 | `manage_tags` | ● | Liste les tags, en pose/retire sur un contact, ou en supprime un définitivement |
 | `search_companies` | | Recherche d'entreprises |
 | `create_company` | ● | Entreprise |
@@ -516,6 +836,78 @@ la seule façon de changer le contenu d'un email ou d'une page déjà créé ét
 d'en recréer un autre, avec un nouvel id, en perdant ses statistiques et ses éventuelles références
 dans une campagne. `PromptBuilder` pousse explicitement l'agent vers ces outils plutôt que
 delete+create dès qu'un email/page existe déjà.
+
+**Modifier les réglages (hors contenu) d'un email existant** — même angle mort qu'au-dessus, pour la
+même raison : `update_entity` reste générique par construction (`setName`/`setDescription`/
+`setIsPublished`/`setCategory`, présents sur tous les types du catalogue), alors que
+`setFromAddress`/`setSubject`/`setUtmTags`/`setPreheaderText`/`setPlainText`/`setPublishUp`/
+`setPublishDown`/etc. n'existent que sur `Email`. `create_email` acceptait déjà certains de ces
+champs à la création (from_name/from_address), mais rien ne permettait de les changer une fois
+l'email créé, et aucun outil ne couvrait `subject`/le pré-header/les tags UTM/le texte brut/la
+fenêtre de publication à aucun moment — d'où `update_email_settings`.
+
+**Un seul outil pour tout ça, volontairement** — la première version distinguait un
+`update_email_sender` (expéditeur) d'un futur outil séparé pour le reste (subject, UTM...), mais
+plusieurs petits outils aux frontières proches (tous "modifient un réglage d'email existant") se
+seraient révélés une source de confusion supplémentaire pour le modèle, pas une clarification :
+fusionnés en un seul `update_email_settings` avant même la première livraison.
+
+- **`subject` ne peut jamais être vide** — contrairement aux autres champs texte (from_name,
+  from_address, reply_to_address, bcc_address, preheader_text, plain_text), qui s'effacent en `null`
+  sur une valeur vide : un email sans objet n'a pas de sens, l'outil refuse plutôt que d'accepter.
+- **`utm_tags` remplace tout le tableau existant** (objet vide `{}` pour tout retirer), comparé
+  indépendamment de l'ordre des clés (`ksort()` des deux côtés avant comparaison) pour ne pas
+  déclencher un aller-retour de confirmation inutile sur un réordonnancement sans effet réel.
+- **`publish_up`/`publish_down`** attendent une chaîne (`"YYYY-MM-DD HH:MM:SS"`), convertie en
+  `\DateTime` avant d'être passée à Mautic (mapping Doctrine `DATETIME_MUTABLE`, une chaîne brute
+  romprait la conversion au `flush()`) ; une date invalide est rejetée avant tout appel à
+  `saveEntity()`, une chaîne vide retire la borne.
+- Comme pour l'expéditeur seul : une valeur vide efface un champ blanquable en `null` (jamais une
+  chaîne vide littérale), une valeur identique à l'actuelle n'est jamais comptée comme une
+  modification.
+
+**Modifier un formulaire existant (champs, actions)** — même angle mort qu'au-dessus, découvert en
+usage réel : `create_form` savait créer un formulaire avec ses champs et ses actions, mais rien ne
+permettait de changer une action déjà en place (ex. l'adresse destinataire d'une action "Envoyer un
+email brut") — la seule option était de supprimer tout le formulaire et d'en recréer un autre,
+perdant son id, ses soumissions déjà reçues et ses éventuelles références dans une campagne. D'où
+`read_form` + `update_form`.
+
+- **`Service/Form/FormDefinitions.php`/`FormPropertyBuilder.php`** — les types de champ/action et la
+  construction des `properties` (un `match()` par type, ex. `select`/`radiogrp`/`checkboxgrp`
+  partagent la même forme `{syncList, list}`, `form.email` porte `to`/`cc`/`bcc`...) étaient
+  dupliqués dans `CreateFormTool` seul ; extraits en services partagés pour qu'`update_form` s'appuie
+  sur exactement la même logique plutôt qu'une copie pouvant diverger avec le temps.
+  `CreateFormTool` a été refactoré pour les utiliser, sans changement de comportement.
+- **`read_form` est un préalable, pas une option** — ni les champs ni les actions ne sont indexés de
+  façon stable une fois le formulaire rechargé depuis la base : `Form::$fields`/`Form::$actions`
+  sont mappés `indexBy('id')` côté Doctrine (vérifié dans `FormBundle/Entity/Form.php`), donc
+  `$form->getFields()->get($alias)` ne fonctionne PAS après un rechargement, contrairement à ce que
+  `CreateFormTool` utilise en interne à la création (avant tout id, alias comme clé mémoire
+  seulement). `update_form` retrouve donc un champ/une action en **parcourant** la collection et en
+  comparant `alias`/`id`, jamais par accès direct à une clé.
+- **Suppression = `EntityManagerInterface::remove()` explicite, pas un simple retrait de la
+  collection** — `Form::fields`/`Form::actions` sont en cascade `persist/remove/detach/merge/refresh`
+  mais **sans** `orphanRemoval` (absent de la config `createOneToMany()` dans le core Mautic) :
+  retirer un champ/une action de la collection (`removeElement()`) sans appeler `remove()` dessus
+  explicitement laisserait la ligne orpheline en base au lieu de la supprimer. `update_form` appelle
+  toujours les deux, dans cet ordre.
+- **Mise à jour toujours PARTIELLE** — `fields`/`actions` acceptent un tableau d'opérations
+  (`op=add|update|remove`), chacune ne touchant que les champs explicitement fournis : changer
+  `email_to` sur une action `form.email` ne réinitialise jamais `subject`/`message`/`cc`/`bcc`. Pour
+  ça, une mise à jour reconstruit les propriétés en fusionnant l'existant
+  (`actionPropertiesAsDefinition()`, qui relit `getProperties()` et le remet dans la forme attendue
+  par `FormPropertyBuilder`) avec ce que l'appelant fournit — jamais un rafistolage clé par clé, qui
+  casserait facilement la cohérence d'un type d'action (ex. `email.send.user` porte `email_id` ET
+  `user_ids` ensemble).
+- **Changer le `type` d'une action existante redevient une validation stricte** (comme un `add`) —
+  les champs obligatoires du nouveau type ne sont probablement pas ceux de l'ancien
+  (`email.send.user` exige `email_id`+`user_ids`, `lead.changetags` n'exige rien) : accepter un
+  changement de type sans revalider laisserait une action mal formée.
+- **Vérifié contre une vraie base MySQL locale** avant d'écrire le code définitif : un formulaire
+  temporaire avec un champ et une action a confirmé, dans cette session, que `removeElement()` seul
+  ne supprime pas la ligne (`orphanRemoval` bien absent) et qu'un `remove()` explicite le fait —
+  données de test nettoyées ensuite.
 
 `Email::customHtml`/`Page::customHtml` sont **toujours** ce qui part réellement au
 destinataire/visiteur, quel que soit `template` — vérifié dans `MailHelper::setEmail()` (core) :
@@ -605,9 +997,13 @@ Contact et Company n'entrent pas dans `EntityCatalog` (pas de notion de publicat
 personnalisés au lieu de name/description) : ils gardent leurs outils dédiés
 (`create_contact`/`update_contact`, `create_company`/`update_company`/`search_companies`).
 
-Ce tableau ne liste que les outils Mautic locaux, connus à la compilation. Si une clé Bright Data
-est renseignée, des outils supplémentaires `brightdata_*` (recherche web, scraping) apparaissent
-en plus, découverts en direct — voir [Recherche et navigation web](#recherche-et-navigation-web-bright-data-mcp).
+Ce tableau ne liste que les outils Mautic locaux, connus à la compilation. Des outils supplémentaires
+apparaissent en plus, découverts en direct sur leur serveur MCP respectif, selon la configuration :
+`brightdata_*` (recherche web, scraping) si une clé Bright Data est renseignée — voir [Recherche et
+navigation web](#recherche-et-navigation-web-bright-data-mcp) — `prospeo_*` (recherche/enrichissement
+B2B) si une clé Prospeo est renseignée — voir [Recherche de prospects B2B](#recherche-de-prospects-b2b-prospeo-mcp)
+— et `datagouv_*` (données publiques françaises) si activé, sans clé — voir [Données
+publiques](#données-publiques-datagouvfr-mcp).
 
 ### Thèmes d'email
 

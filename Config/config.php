@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use MauticPlugin\WittyBundle\Controller\ApolloWaterfallWebhookController;
 use MauticPlugin\WittyBundle\Controller\AuditController;
 use MauticPlugin\WittyBundle\Controller\FileController;
 use MauticPlugin\WittyBundle\Controller\MeetJoinController;
@@ -19,7 +20,7 @@ return [
     // Le changement de version declenche Engine::up() sur Migrations/ au prochain
     // mautic:plugins:reload : c'est ce qui cree les tables sur une instance ou le
     // plugin etait deja installe.
-    'version'     => '2.8.0',
+    'version'     => '3.0.0',
     'author'      => 'Witty',
 
     'routes' => [
@@ -232,6 +233,18 @@ return [
                 'controller'   => MeetSlotAvailabilityController::class.'::availabilityAction',
                 'method'       => 'GET',
                 'requirements' => ['fieldId' => '\d+'],
+            ],
+            // Apollo (pas un visiteur) appelle cet endpoint : meme raisonnement
+            // que les deux routes ci-dessus (hors du firewall), pas pour
+            // laisser passer un contact sans compte mais un service tiers qui
+            // ne peut pas s'authentifier comme un utilisateur Mautic. Le jeton
+            // dans le chemin (cf. WittyConfig::getApolloWebhookToken()) fait
+            // office d'authentification a sa place.
+            'witty_apollo_waterfall_webhook' => [
+                'path'         => '/witty/apollo/waterfall/webhook/{token}',
+                'controller'   => ApolloWaterfallWebhookController::class.'::receiveAction',
+                'method'       => 'POST',
+                'requirements' => ['token' => '[a-f0-9]{32}'],
             ],
         ],
     ],

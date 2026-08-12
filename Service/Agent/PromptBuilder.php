@@ -25,8 +25,13 @@ class PromptBuilder
         $userName = method_exists($user, 'getName') ? (string) $user->getName() : 'utilisateur';
         $siteUrl  = (string) $this->parameters->get('site_url');
 
-        $skillsList = $this->buildSkillsList();
-        $webAccess  = $this->buildWebAccessNote();
+        $skillsList  = $this->buildSkillsList();
+        $webAccess   = $this->buildWebAccessNote();
+        $prospecting = $this->buildProspectingNote();
+        $enrichment  = $this->buildApolloEnrichmentNote();
+        $quickenrich = $this->buildQuickenrichNote();
+        $datagouv    = $this->buildDatagouvNote();
+        $bulkJobs    = $this->buildBulkJobsNote();
 
         $confirmation = $this->config->requiresConfirmation()
             ? "Le mode confirmation est ACTIF. Tout outil d ecriture renvoie d abord status=confirmation_required avec un apercu. "
@@ -48,6 +53,8 @@ class PromptBuilder
             - Meme logique pour une landing page avec du JavaScript fonctionnel (compte a rebours, etats dynamiques) : regarde list_page_templates et passe par create_page_from_template. Ces pages sont enregistrees en mode code source expres, ne propose jamais de les ouvrir dans un builder visuel.
             - Pour modifier un email ou une landing page qui existe DEJA, ne le supprime jamais pour le recreer (perte de l id, des statistiques, des references dans une campagne) : appelle read_entity_content(type, id) pour recuperer son HTML actuel, modifie-le, puis update_entity_content(type, id, html) pour l enregistrer en place. N utilise delete_entity que si l utilisateur demande explicitement une suppression.
             - Si read_entity_content signale code_mode=false (theme visuel/MJML), update_entity_content refusera (remplacement integral reserve au mode code source) : utilise replace_entity_content_text(type, id, search, replace) a la place, il fonctionne quel que soit le mode et synchronise la source MJML si elle existe. Ne dis JAMAIS qu une refonte visuelle complete (couleurs, polices, rayons, espacements...) est impossible via l API pour ce genre d objet avant d avoir essaye cette methode : le HTML compile par MJML repete ses styles en inline sur chaque element plutot que dans une seule feuille <style> (contrairement a une page en mode code source) — une refonte se fait donc en PLUSIEURS appels a replace_entity_content_text, un par valeur de design distincte (l ancienne couleur de fond -> la nouvelle, l ancien font-family -> le nouveau, l ancien border-radius -> le nouveau, etc.), chaque appel remplacant TOUTES les occurrences de cette valeur d un coup (verifie le nombre d occurrences renvoye). Lis d abord le HTML actuel avec read_entity_content pour reperer les valeurs exactes a remplacer.
+            - update_entity ne connait que nom/description/publication/categorie (generique, commun a tous les types du catalogue) : pour tout le reste d un email deja cree — expediteur (from_name/from_address/reply_to_address/bcc_address/use_owner_as_mailer), subject (objet, ne peut jamais etre vide), preheader_text, utm_tags, plain_text, publish_up/publish_down — utilise update_email_settings, jamais update_entity (son schema n accepte pas ces champs). Un seul outil pour tout ca, ne cherche pas d autre nom du genre update_email_sender.
+            - Pour modifier un formulaire qui existe DEJA (ex. changer le destinataire d une action "Envoyer un email", ajouter/retirer un champ, changer un champ obligatoire), ne le supprime JAMAIS pour le recreer avec create_form (perte de l id, des soumissions deja recues, des references dans une campagne) : appelle d abord read_form(id) pour connaitre l alias exact de chaque champ et l id exact de chaque action (aucun des deux ne s invente), puis update_form(id, fields=[...], actions=[...]) avec op=add/update/remove par entree. Une mise a jour est PARTIELLE : ne fournis que les champs qui changent reellement (ex. juste email_to pour changer un destinataire), le reste de l action/du champ vise reste inchange. N utilise delete_entity que si l utilisateur demande explicitement de supprimer tout le formulaire.
             - create_template/update_template/delete_template touchent la bibliotheque de templates PARTAGEE (utilisee par toutes les conversations futures, tous utilisateurs) : ne les appelle JAMAIS de ta propre initiative en redigeant un simple email ou une page ponctuelle. Uniquement si l utilisateur demande explicitement de creer/modifier/supprimer un template pour un usage futur (ex. "fais-en un template qu on pourra reutiliser", "transforme cet email en template"). Pour creer un bon template : analyse le contenu ou l exemple fourni par l utilisateur, distingue ce qui doit rester fixe (la structure) de ce qui doit varier a chaque usage (les emplacements {{CLE}}), et ecris une consigne de redaction precise par emplacement (label, guidance, exemple, default si facultatif) plutot que de le laisser flou — c est ce qui permettra a un futur appel de create_email_from_template/create_page_from_template de le remplir correctement au lieu de deviner.
             - Meme regle pour create_skill/update_skill (bibliotheque de skills PARTAGEE, cf. la liste dans ces instructions) : jamais de ta propre initiative, uniquement si l utilisateur demande explicitement de creer/enregistrer/modifier un skill/playbook/strategie pour usage futur. Identifie le skill a modifier par son nom exact (voir la liste ci-dessous ou read_skill), jamais par un id.
             - Enchaine les outils dans l ordre logique : un email doit exister avant d etre reference dans une campagne.
@@ -65,6 +72,16 @@ class PromptBuilder
             {$skillsList}
 
             {$webAccess}
+
+            {$prospecting}
+
+            {$enrichment}
+
+            {$quickenrich}
+
+            {$datagouv}
+
+            {$bulkJobs}
 
             {$confirmation}
             PROMPT;
@@ -85,6 +102,158 @@ class PromptBuilder
         return 'Tu disposes d outils de recherche et de scraping web (prefixe brightdata_, decouverts en direct '
             ."sur le serveur Bright Data). Utilise-les pour toute question necessitant une information a jour ou "
             .'externe a Mautic ; cite tes sources quand c est pertinent.';
+    }
+
+    /**
+     * Meme raisonnement que buildWebAccessNote() : les outils prefixes
+     * prospeo_ (search_person, enrich_person, search_company...) n'existent
+     * dans la liste d'outils que si la cle API Prospeo est renseignee.
+     *
+     * Contrairement aux outils Apollo/QuickEnrich (locaux, description ecrite
+     * par ce plugin), ceux-ci sont decouverts en direct sur le serveur MCP de
+     * Prospeo : leur description vient de Prospeo, qui n'a evidemment aucune
+     * notion de Mautic. Le namespace prospeo_ (ToolRegistry, cf.
+     * McpClientInterface) evite deja toute collision de NOM avec un outil
+     * Mautic (prospeo_search_person != search_contacts), mais c'est cette
+     * note, pas la description distante, qui porte toute la clarification
+     * "objet externe, pas un contact Mautic" — d'ou le rappel explicite,
+     * meme registre que buildQuickenrichNote().
+     */
+    private function buildProspectingNote(): string
+    {
+        if (!$this->config->isProspeoConfigured()) {
+            return 'Aucune recherche de prospects configuree : tu ne peux pas chercher de profils/entreprises B2B. '
+                ."Dis-le si l utilisateur te le demande, ne l invente jamais.";
+        }
+
+        return 'Tu disposes d outils de recherche et d enrichissement de profils/entreprises B2B (prefixe prospeo_, '
+            .'decouverts en direct sur le serveur Prospeo — ex. prospeo_search_person pour chercher des prospects '
+            .'selon des criteres, prospeo_enrich_person pour reveler l email/le mobile d un profil deja trouve, '
+            .'prospeo_search_company). A ne surtout pas confondre avec search_contacts (celui-la cherche parmi les '
+            .'contacts deja dans Mautic) : les outils prospeo_* ne connaissent que Prospeo, un resultat qu ils '
+            .'renvoient n est PAS un contact Mautic tant que tu ne l as pas cree via bulk_create_contacts. Pour ca, '
+            .'extrais toi-meme les champs pertinents de chaque profil retenu (email si enrichi, prenom, nom, poste, '
+            .'entreprise, LinkedIn...) et appelle bulk_create_contacts. Cree le segment au prealable avec '
+            .'create_segment si besoin, puis passe son id. prospeo_search_person facture 1 credit par page de 25 '
+            .'resultats meme sans enrichissement ; prospeo_enrich_person facture en plus pour reveler email/mobile '
+            .'— arrete-toi au nombre de contacts demande par l utilisateur, ne pagine pas au-dela.';
+    }
+
+    /**
+     * enrich_person/bulk_enrich_people/enrich_company/bulk_enrich_companies
+     * n'apparaissent que si la cle API Apollo est renseignee. Contrairement a
+     * Prospeo, ce sont des outils locaux normaux (pas de decouverte MCP,
+     * jamais de prefixe apollo_) : volontairement limites a l'enrichissement,
+     * aucun outil Apollo de recherche/contacts/listes/sequences/emails n'est
+     * integre — donc aucun risque que l agent cree quoi que ce soit cote
+     * Apollo en pensant faire du Mautic.
+     */
+    private function buildApolloEnrichmentNote(): string
+    {
+        if (!$this->config->isApolloConfigured()) {
+            return 'Aucun enrichissement Apollo configure : tu ne peux pas reveler l email/le titre/l entreprise '
+                ."d un profil ou d une entreprise via Apollo. Dis-le si l utilisateur te le demande, ne l invente jamais.";
+        }
+
+        return 'Tu disposes d outils d enrichissement Apollo : enrich_person/bulk_enrich_people (profil -> titre, '
+            .'entreprise, email si reveal_personal_emails) et enrich_company/bulk_enrich_companies (industrie, '
+            .'taille, technologies). Fournis le maximum d identifiants connus (nom+entreprise/domaine, email, URL '
+            .'LinkedIn) : contrairement a une recherche, ces outils ENRICHISSENT un profil/une entreprise deja '
+            .'identifie, ils n en decouvrent pas de nouveaux par criteres. Chaque appel consomme des credits Apollo '
+            .'des qu une donnee est trouvee — ne pas enrichir en boucle sans que l utilisateur l ait demande. Comme '
+            .'pour Prospeo, transforme toi-meme un resultat retenu en contacts Mautic via bulk_create_contacts '
+            .'(segment_id optionnel, cree au prealable avec create_segment si besoin).'
+            ."\n\n"
+            .'Pour un enrichissement plus pousse (sources en cascade, quand enrich_person ne suffit pas), tu as '
+            .'aussi enrich_person_waterfall + check_waterfall_enrichment — reserves aux profils Mautic existants ou '
+            .'deja identifies, PAS a de la decouverte. enrich_person_waterfall exige un argument mode explicite : '
+            .'"email" (uniquement l email), "phone" (uniquement le telephone) ou "both" (les deux). Choisis mode '
+            .'STRICTEMENT selon ce que l utilisateur a demande — "trouve son email" = email seul, "trouve son '
+            .'numero"/"son telephone" = phone seul, "enrichis-le completement"/"les deux" = both. Ne choisis JAMAIS '
+            .'both par defaut faute de precision : redemande a l utilisateur si ce n est pas clair, le cout en '
+            .'credits Apollo differe fortement selon le choix (et un mode mal choisi facture pour une donnee que '
+            .'personne n a demandee). Cet enrichissement est ASYNCHRONE : enrich_person_waterfall ne renvoie jamais '
+            .'l email/le telephone lui-meme, seulement un request_id — previens l utilisateur que le resultat peut '
+            .'prendre plusieurs minutes, puis rappelle check_waterfall_enrichment(request_id=...) plus tard (sur ce '
+            .'tour si l utilisateur attend, ou sur un tour ulterieur sinon, avec contact_id si le request_id n est '
+            .'plus disponible). Une fois le resultat recupere (status=completed), c est toi qui appelles '
+            .'update_contact pour l enregistrer sur le contact Mautic — check_waterfall_enrichment n ecrit jamais '
+            .'rien lui-meme.';
+    }
+
+    /**
+     * quickenrich_search_contacts/quickenrich_list_filter_values/
+     * quickenrich_find_employee_email/quickenrich_find_employee_phone
+     * n'apparaissent que si la cle API QuickEnrich est renseignee.
+     */
+    private function buildQuickenrichNote(): string
+    {
+        if (!$this->config->isQuickenrichConfigured()) {
+            return 'Aucune recherche QuickEnrich configuree : tu ne peux pas chercher de contacts dans cette base '
+                ."externe. Dis-le si l utilisateur te le demande, ne l invente jamais.";
+        }
+
+        return 'Tu disposes de quickenrich_search_contacts : recherche de contacts dans la base QuickEnrich '
+            .'(externe, GRATUITE), a ne surtout pas confondre avec search_contacts (celui-la cherche parmi les '
+            .'contacts deja dans Mautic). Comme prospeo_search_person mais gratuit : filtre par titre, '
+            .'localisation, entreprise, taille, industrie, chiffre d affaires, technologies utilisees... Endpoint de '
+            .'decouverte uniquement, jamais d email/telephone en clair — seulement has_email/has_phone (la donnee '
+            .'existe ou non en base, sans etre revelee). Au moins un filtre est obligatoire, l appel echoue sinon. '
+            .'country_code/industry_linkedin/number_of_employees/revenue/services attendent une valeur EXACTE : '
+            .'appelle quickenrich_list_filter_values(dimension) avant de filtrer dessus, ne devine jamais une valeur '
+            .'(ex. "10M-50M" pour revenue, pas "10-50 millions"). Une fois un contact identifie (has_email/has_phone '
+            .'a true, ou fourni par l utilisateur), revele sa vraie valeur avec quickenrich_find_employee_email ou '
+            .'quickenrich_find_employee_phone (linkedin_url, ou company_url+first_name+last_name) — ces deux outils '
+            .'facturent un credit (phone : seulement si trouve), contrairement a la recherche qui reste gratuite, '
+            .'donc ne les appelle que pour un contact reellement retenu, jamais en boucle sur toute une liste par '
+            .'defaut. Comme pour Prospeo/Apollo, transforme toi-meme un contact retenu en contact Mautic via '
+            .'bulk_create_contacts (segment_id optionnel, cree au prealable avec create_segment si besoin).';
+    }
+
+    /**
+     * Les outils prefixes datagouv_ (search_datasets, query_resource_data...)
+     * n'apparaissent dans la liste d'outils que si l interrupteur data.gouv.fr
+     * est active (pas de cle API : serveur public, cf. WittyConfig::isDatagouvEnabled()).
+     */
+    private function buildDatagouvNote(): string
+    {
+        if (!$this->config->isDatagouvEnabled()) {
+            return 'Aucun acces aux donnees publiques data.gouv.fr configure : tu ne peux pas chercher/consulter de '
+                ."jeux de donnees publics francais. Dis-le si l utilisateur te le demande, ne l invente jamais.";
+        }
+
+        return 'Tu disposes d outils de recherche et de consultation des donnees publiques francaises (prefixe '
+            .'datagouv_, decouverts en direct sur le serveur MCP officiel de data.gouv.fr — ex. datagouv_search_datasets '
+            .'pour chercher un jeu de donnees par mots-cles, datagouv_query_resource_data pour interroger un fichier '
+            .'CSV/XLSX avec des filtres sans le telecharger entierement, datagouv_download_and_parse_resource pour '
+            .'recuperer et parser un fichier CSV/JSON/JSONL, datagouv_search_dataservices/datagouv_get_dataservice_openapi_spec '
+            .'pour trouver une API publique et sa specification). Lecture seule, aucun risque d ecriture : ces outils '
+            .'ne connaissent que les donnees publiques francaises, rien a voir avec Mautic (contacts, segments, '
+            .'campagnes) — un jeu de donnees ou une API trouvee ici n est pas un objet Mautic. Le serveur est marque '
+            .'experimental par data.gouv.fr lui-meme : verifie/recoupe les chiffres avant de les presenter comme '
+            .'fiables a l utilisateur, surtout s ils doivent finir dans un email ou un contenu envoye a des contacts.';
+    }
+
+    /**
+     * Toujours affiche (pas de gate config, contrairement aux notes
+     * precedentes) : ces outils locaux existent toujours dans la liste, seul
+     * le fournisseur cible peut etre non configure (chaque start_* le
+     * verifie lui-meme et renvoie une erreur claire le cas echeant).
+     */
+    private function buildBulkJobsNote(): string
+    {
+        return 'Pour un enrichissement/une recherche a VOLUME (un segment entier, des milliers de resultats vises) '
+            .'qui ne tiendrait pas dans un seul tour de chat, utilise un outil start_*bulk* plutot que la version '
+            .'synchrone : start_apollo_bulk_enrich_people (tout un segment Mautic), start_quickenrich_bulk_search '
+            .'(pagine jusqu a target_count), start_bulk_mcp_search (pagine un outil prospeo_*/datagouv_* — fournis '
+            .'tool_name/page_argument/items_field exacts d apres le schema reel de l outil vise, ne devine jamais). '
+            .'Ces outils ne renvoient JAMAIS de resultat directement, seulement un job_id : le job tourne en '
+            .'arriere-plan (quelques minutes a plusieurs heures selon le volume, un lot traite a chaque passage de '
+            .'cron), previens l utilisateur que ca prendra du temps plutot que d attendre une reponse immediate. '
+            .'Utilise check_bulk_job(job_id) pour suivre la progression (statut queued/running/completed/failed), '
+            .'puis, une fois completed, list_bulk_job_items(job_id) pour recuperer les resultats par page (jamais '
+            .'tout d un coup). Comme pour le waterfall Apollo, rien ne s applique automatiquement a un contact : '
+            .'c est toi qui decides, a partir des resultats revus, d appeler update_contact/bulk_create_contacts.';
     }
 
     /**

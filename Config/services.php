@@ -4,9 +4,13 @@ declare(strict_types=1);
 
 use Mautic\CoreBundle\DependencyInjection\MauticCoreExtension;
 use MauticPlugin\WittyBundle\Integration\WittyIntegration;
+use MauticPlugin\WittyBundle\Service\Job\Handlers\McpBulkSearchJobHandler;
+use MauticPlugin\WittyBundle\Service\Job\JobHandlerInterface;
+use MauticPlugin\WittyBundle\Service\Job\JobHandlerRegistry;
 use MauticPlugin\WittyBundle\Service\Mcp\McpClientInterface;
 use MauticPlugin\WittyBundle\Service\Tool\ToolInterface;
 use MauticPlugin\WittyBundle\Service\Tool\ToolRegistry;
+use MauticPlugin\WittyBundle\Service\Tool\Tools\StartBulkMcpSearchTool;
 use Symfony\Component\DependencyInjection\Loader\Configurator\ContainerConfigurator;
 
 use function Symfony\Component\DependencyInjection\Loader\Configurator\tagged_iterator;
@@ -26,6 +30,11 @@ return function (ContainerConfigurator $configurator): void {
     // d'outils n'est pas connue a la compilation, ToolRegistry l'interroge en
     // direct (tools/list) et l'expose au modele sous forme de McpTool.
     $services->instanceof(McpClientInterface::class)->tag('witty.mcp_client');
+
+    // Un type de job de fond (traitement en masse, cf. Service/Job/) = une
+    // classe taguee, choisie par Command/ProcessBackgroundJobsCommand.php
+    // via WittyBackgroundJob::getType(), meme principe que witty.tool.
+    $services->instanceof(JobHandlerInterface::class)->tag('witty.job_handler');
 
     // Objets de valeur : construits a la main, jamais injectes. Les laisser dans
     // l'autowiring ferait echouer la compilation du conteneur sur leurs
@@ -47,6 +56,18 @@ return function (ContainerConfigurator $configurator): void {
 
     $services->get(ToolRegistry::class)
         ->arg('$tools', tagged_iterator('witty.tool'))
+        ->arg('$mcpClients', tagged_iterator('witty.mcp_client'));
+
+    $services->get(JobHandlerRegistry::class)
+        ->arg('$handlers', tagged_iterator('witty.job_handler'));
+
+    // Meme raisonnement que ToolRegistry::$mcpClients : McpBulkSearchJobHandler
+    // et l'outil qui cree ses jobs choisissent le client MCP a l'execution
+    // (namespace fourni), pas a la compilation.
+    $services->get(McpBulkSearchJobHandler::class)
+        ->arg('$mcpClients', tagged_iterator('witty.mcp_client'));
+
+    $services->get(StartBulkMcpSearchTool::class)
         ->arg('$mcpClients', tagged_iterator('witty.mcp_client'));
 
     // Cle de service imposee par IntegrationHelper : mautic.integration.<nom en

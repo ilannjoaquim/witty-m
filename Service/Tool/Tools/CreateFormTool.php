@@ -9,6 +9,8 @@ use Mautic\FormBundle\Entity\Field;
 use Mautic\FormBundle\Entity\Form;
 use Mautic\FormBundle\Model\FormModel;
 use MauticPlugin\WittyBundle\EventListener\FormSubscriber;
+use MauticPlugin\WittyBundle\Service\Form\FormDefinitions;
+use MauticPlugin\WittyBundle\Service\Form\FormPropertyBuilder;
 use MauticPlugin\WittyBundle\Service\PlugNmeet\MeetInvitationCreator;
 use MauticPlugin\WittyBundle\Service\PlugNmeet\MeetSlotAvailabilityCalculator;
 use MauticPlugin\WittyBundle\Service\Tool\AbstractTool;
@@ -16,36 +18,10 @@ use MauticPlugin\WittyBundle\Service\WittyConfig;
 
 class CreateFormTool extends AbstractTool
 {
-    /**
-     * Types acceptes par Mautic (Helper\FormFieldHelper), plus notre champ
-     * "Creneau de rendez-vous". Volontairement hors liste : les types propres
-     * a une integration tierce (ex. lookup personnalise autre que companyLookup).
-     */
-    private const FIELD_TYPES = [
-        'text', 'email', 'textarea', 'tel', 'url', 'number', 'date', 'datetime',
-        'country', 'select', 'radiogrp', 'checkboxgrp', 'hidden', 'freetext', 'button',
-        'captcha', 'freehtml', 'pagebreak', 'slider', 'password', 'companyLookup', 'file',
-        FormSubscriber::SLOT_PICKER_FIELD_TYPE,
-    ];
-
-    /** Types d'action de soumission geres par cet outil. */
-    private const ACTION_TYPES = [
-        FormSubscriber::ACTION_KEY,
-        'email.send.lead',
-        'email.send.user',
-        'lead.changelist',
-        'lead.changetags',
-        'lead.updatelead',
-        'lead.pointschange',
-        'form.email',
-        'form.repost',
-    ];
-
-    private const POINTS_OPERATORS = ['plus', 'minus', 'times', 'divide'];
-
     public function __construct(
         private FormModel $formModel,
         private WittyConfig $config,
+        private FormPropertyBuilder $properties,
     ) {
     }
 
@@ -58,12 +34,13 @@ class CreateFormTool extends AbstractTool
     {
         return 'Cree un formulaire Mautic avec ses champs et ses actions de soumission. Les champs peuvent etre relies a un champ de contact '
             .'ou d entreprise (mapped_field/mapped_object) pour alimenter la fiche a la soumission. Types de champ disponibles : '
-            .implode(', ', self::FIELD_TYPES).'. Actions disponibles : '.implode(', ', self::ACTION_TYPES).'. '
+            .implode(', ', FormDefinitions::FIELD_TYPES).'. Actions disponibles : '.implode(', ', FormDefinitions::ACTION_TYPES).'. '
             .'Le type '.FormSubscriber::SLOT_PICKER_FIELD_TYPE.' transforme le formulaire en calendrier de prise de rendez-vous '
             .'(cf. le parametre slot_picker) ; combine avec l action '.FormSubscriber::ACTION_KEY.', cela cree un Calendly complet : '
             .'le contact choisit un creneau, une salle plugNmeet dediee est creee a la volee et le lien d invitation est genere. '
             .'Combine avec email.send.lead, on peut aussi envoyer un email de confirmation Mautic existant a la soumission, et avec '
-            .'email.send.user notifier une ou plusieurs personnes de l equipe (ex. prevenir un commercial d une nouvelle prise de rendez-vous).';
+            .'email.send.user notifier une ou plusieurs personnes de l equipe (ex. prevenir un commercial d une nouvelle prise de rendez-vous). '
+            .'Pour modifier un formulaire DEJA cree (champs/actions), utilise update_form, jamais create_form a nouveau.';
     }
 
     public function isWriteOperation(): bool
@@ -108,7 +85,7 @@ class CreateFormTool extends AbstractTool
                     'type'       => 'object',
                     'properties' => [
                         'label'    => ['type' => 'string'],
-                        'type'     => ['type' => 'string', 'enum' => self::FIELD_TYPES],
+                        'type'     => ['type' => 'string', 'enum' => FormDefinitions::FIELD_TYPES],
                         'alias'    => ['type' => 'string', 'description' => 'Genere depuis le label si absent.'],
                         'required' => ['type' => 'boolean'],
                         'mapped_object' => [
@@ -178,7 +155,7 @@ class CreateFormTool extends AbstractTool
                     'type'       => 'object',
                     'properties' => [
                         'name' => ['type' => 'string', 'description' => 'Nom interne de l action (visible dans l onglet Actions du formulaire).'],
-                        'type' => ['type' => 'string', 'enum' => self::ACTION_TYPES],
+                        'type' => ['type' => 'string', 'enum' => FormDefinitions::ACTION_TYPES],
 
                         // witty.create_meet_invitation_link
                         'target_field' => [
@@ -223,7 +200,7 @@ class CreateFormTool extends AbstractTool
                         ],
 
                         // lead.pointschange
-                        'points_operator' => ['type' => 'string', 'enum' => self::POINTS_OPERATORS, 'description' => 'Pour lead.pointschange. Defaut plus.'],
+                        'points_operator' => ['type' => 'string', 'enum' => FormDefinitions::POINTS_OPERATORS, 'description' => 'Pour lead.pointschange. Defaut plus.'],
                         'points'           => ['type' => 'integer', 'description' => 'Pour lead.pointschange : valeur appliquee avec points_operator.'],
                         'points_group_id'  => ['type' => 'integer', 'description' => 'Pour lead.pointschange : ID du groupe de points concerne (facultatif).'],
 
@@ -262,16 +239,16 @@ class CreateFormTool extends AbstractTool
         foreach ($fields as $field) {
             $type = (string) ($field['type'] ?? '');
 
-            if (!in_array($type, self::FIELD_TYPES, true)) {
-                return ['status' => 'error', 'error' => sprintf('Type de champ inconnu : %s. Types acceptes : %s', $type, implode(', ', self::FIELD_TYPES))];
+            if (!in_array($type, FormDefinitions::FIELD_TYPES, true)) {
+                return ['status' => 'error', 'error' => sprintf('Type de champ inconnu : %s. Types acceptes : %s', $type, implode(', ', FormDefinitions::FIELD_TYPES))];
             }
         }
 
         foreach ($actions as $action) {
             $type = (string) ($action['type'] ?? '');
 
-            if (!in_array($type, self::ACTION_TYPES, true)) {
-                return ['status' => 'error', 'error' => sprintf('Type d action inconnu : %s. Types acceptes : %s', $type, implode(', ', self::ACTION_TYPES))];
+            if (!in_array($type, FormDefinitions::ACTION_TYPES, true)) {
+                return ['status' => 'error', 'error' => sprintf('Type d action inconnu : %s. Types acceptes : %s', $type, implode(', ', FormDefinitions::ACTION_TYPES))];
             }
 
             if (in_array($type, ['email.send.lead', 'email.send.user'], true) && (int) ($action['email_id'] ?? 0) <= 0) {
@@ -324,7 +301,7 @@ class CreateFormTool extends AbstractTool
 
         $form = new Form();
         $form->setName($name);
-        $form->setAlias($this->slugify($name));
+        $form->setAlias($this->properties->slugify($name));
         $form->setDescription((string) ($arguments['description'] ?? ''));
         $form->setFormType('campaign' === ($arguments['form_type'] ?? 'standalone') ? 'campaign' : 'standalone');
         $form->setPostAction($postAction);
@@ -349,7 +326,7 @@ class CreateFormTool extends AbstractTool
         foreach ($fields as $index => $definition) {
             $type  = (string) $definition['type'];
             $label = trim((string) ($definition['label'] ?? ''));
-            $alias = $this->slugify((string) ($definition['alias'] ?? $label), 'field');
+            $alias = $this->properties->slugify((string) ($definition['alias'] ?? $label), 'field');
 
             $field = new Field();
             $field->setLabel($label);
@@ -373,10 +350,10 @@ class CreateFormTool extends AbstractTool
                 $field->setIsCustom(true);
             }
 
-            $properties = $this->buildFieldProperties($type, $definition);
+            $fieldProperties = $this->properties->buildFieldProperties($type, $definition);
 
-            if ([] !== $properties) {
-                $field->setProperties($properties);
+            if ([] !== $fieldProperties) {
+                $field->setProperties($fieldProperties);
             }
 
             $form->addField($alias, $field);
@@ -393,7 +370,7 @@ class CreateFormTool extends AbstractTool
             $action->setType($type);
             $action->setOrder($index + 1);
             $action->setForm($form);
-            $action->setProperties($this->buildActionProperties($type, $definition));
+            $action->setProperties($this->properties->buildActionProperties($type, $definition));
 
             $form->addAction((string) $index, $action);
             $createdActions[] = ['name' => $action->getName(), 'type' => $type];
@@ -410,168 +387,5 @@ class CreateFormTool extends AbstractTool
             'url'     => '/s/forms/edit/'.$form->getId(),
             'note'    => 'Formulaire cree non publie. Ouvre-le dans le builder pour verifier la mise en page et le bouton d envoi.',
         ]);
-    }
-
-    /**
-     * @param array<string, mixed> $definition
-     *
-     * @return array<string, mixed>
-     */
-    private function buildFieldProperties(string $type, array $definition): array
-    {
-        return match ($type) {
-            FormSubscriber::SLOT_PICKER_FIELD_TYPE => $this->slotPickerProperties((array) ($definition['slot_picker'] ?? [])),
-            'select', 'radiogrp', 'checkboxgrp' => $this->choiceProperties((array) ($definition['options'] ?? [])),
-            'freehtml' => ['text' => (string) ($definition['html'] ?? '')],
-            // Le template pagebreak.html.twig lit ces deux cles sans
-            // |default() (constate en pratique : RuntimeError "Key ... does
-            // not exist" si properties est vide) ; il les faut donc toujours,
-            // meme si l'appelant ne les demande pas explicitement.
-            'pagebreak' => [
-                'prev_page_label' => 'Precedent',
-                'next_page_label' => 'Suivant',
-            ],
-            'slider'   => [
-                'min'  => (int) ($definition['min'] ?? 0),
-                'max'  => (int) ($definition['max'] ?? 100),
-                'step' => max(1, (int) ($definition['step'] ?? 1)),
-            ],
-            'file' => [
-                'allowed_file_extensions' => [] !== ($definition['allowed_file_extensions'] ?? [])
-                    ? array_values(array_map('strval', (array) $definition['allowed_file_extensions']))
-                    : ['pdf', 'doc', 'docx', 'jpg', 'jpeg', 'png'],
-                'allowed_file_size' => max(1, (int) ($definition['allowed_file_size_mb'] ?? 6)),
-                'public'            => false,
-            ],
-            default => [],
-        };
-    }
-
-    /**
-     * @param array<string> $options
-     *
-     * @return array<string, mixed>
-     */
-    private function choiceProperties(array $options): array
-    {
-        $options = array_values(array_filter($options));
-
-        if ([] === $options) {
-            return [];
-        }
-
-        return [
-            'syncList' => 0,
-            'list'     => array_map(
-                static fn (string $value): array => ['label' => $value, 'value' => $value],
-                array_map('strval', $options),
-            ),
-        ];
-    }
-
-    /**
-     * @param array<string, mixed> $definition
-     *
-     * @return array<string, mixed>
-     */
-    private function buildActionProperties(string $type, array $definition): array
-    {
-        if (FormSubscriber::ACTION_KEY === $type) {
-            $targetField = (string) ($definition['target_field'] ?? MeetInvitationCreator::FIELD_MEETING);
-
-            if (!in_array($targetField, [MeetInvitationCreator::FIELD_WEBINAR, MeetInvitationCreator::FIELD_MEETING], true)) {
-                $targetField = MeetInvitationCreator::FIELD_MEETING;
-            }
-
-            return [
-                'target_field' => $targetField,
-                'room_id'      => trim((string) ($definition['room_id'] ?? '')),
-            ];
-        }
-
-        return match ($type) {
-            'email.send.lead' => ['email' => (int) ($definition['email_id'] ?? 0)],
-            'email.send.user' => [
-                'useremail' => ['email' => (int) ($definition['email_id'] ?? 0)],
-                'user_id'   => array_values(array_filter(array_map('intval', (array) ($definition['user_ids'] ?? [])))),
-            ],
-            'lead.changelist' => [
-                'addToLists'      => array_map('intval', (array) ($definition['add_to_segments'] ?? [])),
-                'removeFromLists' => array_map('intval', (array) ($definition['remove_from_segments'] ?? [])),
-            ],
-            'lead.changetags' => [
-                'add_tags'    => array_values(array_map('strval', (array) ($definition['add_tags'] ?? []))),
-                'remove_tags' => array_values(array_map('strval', (array) ($definition['remove_tags'] ?? []))),
-            ],
-            'lead.updatelead' => array_map('strval', (array) ($definition['update_fields'] ?? [])),
-            'lead.pointschange' => [
-                'operator' => in_array($op = (string) ($definition['points_operator'] ?? 'plus'), self::POINTS_OPERATORS, true) ? $op : 'plus',
-                'points'   => (int) ($definition['points'] ?? 0),
-                'group'    => isset($definition['points_group_id']) ? (int) $definition['points_group_id'] : null,
-            ],
-            'form.email' => [
-                'subject'        => (string) ($definition['email_subject'] ?? ''),
-                'message'        => (string) ($definition['email_message'] ?? ''),
-                'immediately'    => false,
-                'copy_lead'      => false,
-                'set_replyto'    => true,
-                'email_to_owner' => false,
-                'to'             => (string) ($definition['email_to'] ?? ''),
-                'cc'             => (string) ($definition['email_cc'] ?? ''),
-                'bcc'            => (string) ($definition['email_bcc'] ?? ''),
-            ],
-            'form.repost' => [
-                'post_url'             => (string) ($definition['repost_url'] ?? ''),
-                'authorization_header' => (string) ($definition['repost_auth_header'] ?? ''),
-                'failure_email'        => (string) ($definition['repost_failure_email'] ?? ''),
-            ],
-            default => [],
-        };
-    }
-
-    /**
-     * @param array<string, mixed> $config
-     *
-     * @return array<string, mixed>
-     */
-    private function slotPickerProperties(array $config): array
-    {
-        $daysOfWeek = array_values(array_unique(array_map(
-            'intval',
-            (array) ($config['days_of_week'] ?? [1, 2, 3, 4, 5])
-        )));
-        $daysOfWeek = array_values(array_filter($daysOfWeek, static fn (int $day): bool => $day >= 1 && $day <= 7));
-
-        return [
-            'timezone'               => $this->normalizeTimezone((string) ($config['timezone'] ?? MeetSlotAvailabilityCalculator::DEFAULT_TIMEZONE)),
-            'days_of_week'           => [] !== $daysOfWeek ? $daysOfWeek : [1, 2, 3, 4, 5],
-            'start_time'             => $this->normalizeTime((string) ($config['start_time'] ?? '09:00'), '09:00'),
-            'end_time'               => $this->normalizeTime((string) ($config['end_time'] ?? '17:00'), '17:00'),
-            'slot_duration_minutes'  => max(5, (int) ($config['slot_duration_minutes'] ?? 30)),
-            'buffer_days'            => max(0, (int) ($config['buffer_days'] ?? 1)),
-        ];
-    }
-
-    private function normalizeTimezone(string $value): string
-    {
-        return in_array($value, MeetSlotAvailabilityCalculator::utcOffsetChoices(), true)
-            ? $value
-            : MeetSlotAvailabilityCalculator::DEFAULT_TIMEZONE;
-    }
-
-    private function normalizeTime(string $value, string $default): string
-    {
-        return 1 === preg_match('/^([01]?\d|2[0-3]):([0-5]\d)/', $value, $m)
-            ? sprintf('%02d:%s', (int) $m[1], $m[2])
-            : $default;
-    }
-
-    private function slugify(string $value, string $fallbackPrefix = 'form'): string
-    {
-        $value = strtolower(trim($value));
-        $value = preg_replace('/[^a-z0-9]+/', '_', $value) ?? $value;
-        $value = trim($value, '_');
-
-        return '' !== $value ? $value : $fallbackPrefix.'_'.substr((string) time(), -6);
     }
 }

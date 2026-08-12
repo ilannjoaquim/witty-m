@@ -154,6 +154,86 @@ class WittyConfig
         return (bool) ($this->getFeatureSettings()['brightdata_pro_mode'] ?? false);
     }
 
+    /**
+     * Cle du serveur MCP distant Prospeo (recherche/enrichissement de profils
+     * et d'entreprises B2B) — https://mcp.prospeo.io. Meme raisonnement que
+     * Bright Data : une capacite de l'agent, pas un fournisseur de modele.
+     */
+    public function getProspeoApiKey(): string
+    {
+        $configuration = $this->getConfiguration();
+
+        return null === $configuration ? '' : trim((string) ($configuration->getApiKeys()['prospeo_api_key'] ?? ''));
+    }
+
+    public function isProspeoConfigured(): bool
+    {
+        return $this->isPublished() && '' !== $this->getProspeoApiKey();
+    }
+
+    /**
+     * Cle API Apollo (enrichissement people/organizations, API REST classique
+     * — pas le serveur MCP, qui exige OAuth 2.0 cote "partenaire", hors
+     * scope). Meme raisonnement que Bright Data/Prospeo : une capacite de
+     * l'agent, pas un fournisseur de modele.
+     */
+    public function getApolloApiKey(): string
+    {
+        $configuration = $this->getConfiguration();
+
+        return null === $configuration ? '' : trim((string) ($configuration->getApiKeys()['apollo_api_key'] ?? ''));
+    }
+
+    public function isApolloConfigured(): bool
+    {
+        return $this->isPublished() && '' !== $this->getApolloApiKey();
+    }
+
+    /**
+     * Jeton place dans l'URL du webhook waterfall (Controller/ApolloWaterfallWebhookController.php,
+     * cf. EnrichPersonWaterfallTool) pour empecher un tiers qui devinerait
+     * l'URL de POSTer un faux resultat d'enrichissement. Derive de la cle API
+     * Apollo elle-meme plutot que d'un secret stocke a part : rien de
+     * supplementaire a generer/retenir, et il change automatiquement si la
+     * cle change. Ce n'est pas un secret cryptographique protegeant un acces
+     * direct (seul le controleur webhook le verifie, en lecture seule pour
+     * l'exterieur), une troncature de SHA-256 suffit face a ce risque.
+     */
+    public function getApolloWebhookToken(): string
+    {
+        return substr(hash('sha256', 'witty-apollo-waterfall:'.$this->getApolloApiKey()), 0, 32);
+    }
+
+    /**
+     * Cle API QuickEnrich (recherche de contacts, gratuite — API REST,
+     * en-tete Authorization: Bearer). Meme raisonnement que Bright
+     * Data/Prospeo/Apollo : une capacite de l'agent, pas un fournisseur de
+     * modele.
+     */
+    public function getQuickenrichApiKey(): string
+    {
+        $configuration = $this->getConfiguration();
+
+        return null === $configuration ? '' : trim((string) ($configuration->getApiKeys()['quickenrich_api_key'] ?? ''));
+    }
+
+    public function isQuickenrichConfigured(): bool
+    {
+        return $this->isPublished() && '' !== $this->getQuickenrichApiKey();
+    }
+
+    /**
+     * Serveur MCP officiel de data.gouv.fr (recherche/consultation de jeux de
+     * donnees publics francais) — https://mcp.data.gouv.fr/mcp. Contrairement
+     * a Bright Data/Prospeo/Apollo/QuickEnrich, aucune cle API n'existe (acces
+     * public, en lecture seule) : c'est donc un simple interrupteur dans
+     * feature_settings, pas un champ api_keys.
+     */
+    public function isDatagouvEnabled(): bool
+    {
+        return $this->isPublished() && (bool) ($this->getFeatureSettings()['datagouv_enabled'] ?? false);
+    }
+
     public function getApiKey(string $provider): string
     {
         $configuration = $this->getConfiguration();
