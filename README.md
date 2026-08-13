@@ -477,6 +477,14 @@ une classe taguée = une capacité de plus, rien à câbler ailleurs.
     voit le schéma réel via la liste d'outils) — `page_argument`, `page_start`, `page_step`,
     `items_field` (où trouver le tableau de résultats dans la réponse, forme différente d'un outil à
     l'autre).
+  - **`ImportContactsFromJobHandler`** (`import_contacts_from_job`) — convertit les résultats
+    **déjà stockés** d'un job de recherche terminé en contacts Mautic, sans jamais les faire
+    retransiter par le modèle. Voir la sous-section dédiée ci-dessous, la décision produit qui l'a
+    motivée mérite d'être comprise avant de l'utiliser.
+  - **`ApolloBulkEnrichCompaniesJobHandler`** (`apollo_bulk_enrich_companies`) et
+    **`ImportCompaniesFromJobHandler`** (`import_companies_from_job`) — même principe côté
+    entreprises, avec une différence structurelle assumée (toujours une mise à jour par id, jamais de
+    création) : voir la sous-section "Entreprises" ci-dessous.
 - **`Command/ProcessBackgroundJobsCommand.php`** (`witty:jobs:process`) — à planifier via le cron
   système comme `witty:meet:reconcile-attendance` (Mautic n'a pas d'ordonnanceur interne), idéalement
   chaque minute. Borné en **temps** (50 s) plutôt qu'en nombre de jobs : même avec beaucoup de jobs en
@@ -500,6 +508,85 @@ une classe taguée = une capacité de plus, rien à câbler ailleurs.
   `manually_removed=1`, corrélation positionnelle, reprise depuis un curseur) a été exécutée pour de
   vrai contre un segment et des contacts réels dans cette session, données de test nettoyées ensuite
   sans toucher aux données existantes.
+
+#### Convertir/appliquer un job en contacts et entreprises, à volume
+
+`bulk_create_contacts` (existant, synchrone) exige que l'agent recopie chaque contact en argument
+d'appel — viable pour quelques centaines d'entrées, pas pour les milliers de résultats qu'un job de
+recherche peut accumuler : le modèle devrait littéralement générer des dizaines de milliers d'objets
+JSON en sortie, hors de portée de n'importe quel budget de tokens bien avant même le plafond de 500.
+En faire un job de fond classique n'aurait rien réglé : le goulot n'est pas le **temps** d'exécution
+(écrire un contact en base est rapide), c'est la **taille de ce que l'agent doit taper**.
+
+**Décision produit qui a précédé le code** : la première idée envisagée était de laisser l'agent
+écrire lui-même un script PHP sur mesure (voir la structure des données, l'adapter, filtrer les
+lignes pourries) et le faire tourner en tâche de fond. Refusé sciemment — pas une histoire de
+complexité technique, une histoire de **surface de confiance** : contrairement à tous les autres
+outils de ce plugin (des opérations fixes, écrites et testées à l'avance), du PHP généré à la volée
+tournerait sans supervision, avec un accès complet à l'application, sans qu'aucune confirmation
+structurée ne puisse réellement en prévisualiser l'effet — la "confirmation" reviendrait à relire du
+code à chaque fois, ou à ne rien relire du tout.
+
+**Solution retenue : un mapping et des filtres DÉCLARATIFS**, interprétés par du code déjà écrit et
+vérifié, jamais par du code que l'agent fournit :
+
+- **`Service/Job/JobItemFilter.php`** — opérateurs fixes (`has_field`, `field_not_empty`,
+  `field_empty`, `field_equals`, `field_not_equals`, `field_matches`), combinés en ET, jamais du code
+  libre. Une valeur `path` supporte la notation pointée pour descendre dans un résultat imbriqué (ex.
+  `useremail.email` pour un résultat Apollo waterfall). Un opérateur inconnu ou une regex invalide
+  **échoue fermé** (la ligne est écartée) plutôt que de planter le job ou de tout laisser passer par
+  défaut.
+- **`Service/Job/Handlers/ImportContactsFromJobHandler.php`** (`import_contacts_from_job`) — lit par
+  lots de 50 les éléments `status=succeeded` d'un **job source déjà terminé**, applique les filtres
+  puis le mapping (`alias_champ_contact -> chemin`), et délègue la création/mise à jour à
+  `Service/Contact/ContactImporter.php` (même logique de dédoublonnage par email que
+  `BulkCreateContactsTool::importContacts()`, extraite dans un service à part plutôt que dans
+  `BulkCreateContactsTool` lui-même — pour ne jamais retoucher un outil déjà stable/testé).
+- **`start_contacts_import_from_job`** — outil de déclenchement. Contrairement aux trois autres
+  `start_*bulk*` (qui ne déclenchent qu'une recherche externe, jamais une écriture Mautic), celui-ci
+  crée réellement des contacts : `isWriteOperation()=true`, même flux de confirmation que
+  `bulk_create_contacts` — un oubli repéré et corrigé en cours de session (la première version
+  laissait passer la création de job sans confirmation, incohérent avec le reste du plugin). Valide
+  tout **avant** de créer le job (job source introuvable/pas à l'utilisateur/pas terminé/sans
+  résultat exploitable, mapping vide, opérateur de filtre inconnu) : jamais un job voué à échouer dès
+  le premier passage de cron.
+- **`list_bulk_job_items` reste l'outil de découverte** — l'agent l'appelle d'abord sur le job source
+  (`limit=1`) pour voir la forme exacte des données avant d'écrire un mapping, jamais deviné.
+
+**Deux modes de rapprochement, choisis AUTOMATIQUEMENT selon le type du job source** (jamais laissé
+à l'appréciation de l'agent, pour éviter l'erreur) — `ImportContactsFromJobHandler::CONTACT_ID_MATCHED_SOURCE_TYPES` :
+
+- job de **recherche** (Prospeo/QuickEnrich/MCP) — les résultats sont des profils externes, pas
+  encore des contacts Mautic → dédoublonnage par email, création si aucun match
+  (`ContactImporter::importOne()`, comportement d'origine, inchangé).
+- job d'**enrichissement** sur un segment existant (`apollo_bulk_enrich_people`) — `external_ref` du
+  job source porte déjà l'id exact du contact Mautic concerné (c'est
+  `ApolloBulkEnrichPeopleJobHandler` lui-même qui l'y a mis) → mise à jour **par id**, jamais de
+  recherche par email ni de création (`ContactImporter::updateById()`) : un enrichissement met à jour
+  un contact qui existe déjà, par définition. Un id devenu introuvable (contact supprimé entre-temps)
+  échoue explicitement pour cet élément plutôt que de créer un doublon par erreur.
+
+#### Entreprises : même principe, mais toujours une mise à jour
+
+Mautic n'a pas de notion de "segment d'entreprises" ni de champ d'identité fiable équivalent à
+l'email d'un contact (`create_company` lui-même ne fait aucun dédoublonnage) — la source et la
+destination du pipeline entreprises sont donc structurellement différentes de celles des contacts :
+
+- **`start_apollo_bulk_enrich_companies`** (`Service/Job/Handlers/ApolloBulkEnrichCompaniesJobHandler.php`,
+  type `apollo_bulk_enrich_companies`) — reçoit `company_ids` directement (liste explicite, récupérée
+  via `search_companies`/`list_entities` au préalable), pas une requête à construire comme
+  `ApolloBulkEnrichPeopleJobHandler::nextLeadIds()`. Les identifiants envoyés à Apollo (`name`,
+  `website`) sont dérivés directement des champs déjà connus de chaque `Company` Mautic
+  (`Company::getName()`/`getWebsite()`) — jamais redemandés à l'agent, qui a déjà fourni l'id. Même
+  corrélation positionnelle stricte et même échec explicite sur désaccord de comptage
+  qu'`ApolloBulkEnrichPeopleJobHandler`.
+- **`start_companies_import_from_job`** (`Service/Job/Handlers/ImportCompaniesFromJobHandler.php` +
+  `Service/Company/CompanyImporter.php`, type `import_companies_from_job`) — **toujours** une mise à
+  jour par id (`external_ref` = id d'entreprise Mautic, connu avec certitude puisque fourni au
+  lancement de l'enrichissement), **jamais** de création : il n'existe pas de scénario "recherche
+  externe → nouvelle entreprise" ici, seulement "entreprise déjà connue → enrichissement". Mêmes
+  `mapping`/`filters` déclaratifs, même `isWriteOperation()=true` avec confirmation standard, que la
+  version contacts.
 
 ### Pièces jointes (docs, tableurs, images, polices)
 
@@ -785,10 +872,13 @@ outils.
 | `quickenrich_find_employee_email` | | Révèle l'email d'un employé déjà identifié via QuickEnrich |
 | `quickenrich_find_employee_phone` | | Révèle le téléphone d'un employé déjà identifié via QuickEnrich (1 crédit si trouvé) |
 | `start_apollo_bulk_enrich_people` | | Lance en arrière-plan un enrichissement Apollo sur tous les contacts d'un segment |
+| `start_apollo_bulk_enrich_companies` | | Lance en arrière-plan un enrichissement Apollo sur une liste d'entreprises Mautic existantes |
 | `start_quickenrich_bulk_search` | | Lance en arrière-plan une recherche QuickEnrich paginée jusqu'à `target_count` résultats |
 | `start_bulk_mcp_search` | | Lance en arrière-plan la pagination d'un outil MCP (Prospeo, data.gouv.fr) |
 | `check_bulk_job` | | Consulte la progression d'un job de fond |
 | `list_bulk_job_items` | | Récupère une page de résultats d'un job de fond, à revoir avant application |
+| `start_contacts_import_from_job` | ● | Convertit/enrichit en arrière-plan les résultats d'un job terminé en contacts Mautic (mapping/filtres déclaratifs, met à jour par id si le job source est un enrichissement) |
+| `start_companies_import_from_job` | ● | Applique en arrière-plan les résultats d'un job d'enrichissement d'entreprises terminé sur les entreprises Mautic correspondantes (toujours une mise à jour, jamais une création) |
 | `manage_tags` | ● | Liste les tags, en pose/retire sur un contact, ou en supprime un définitivement |
 | `search_companies` | | Recherche d'entreprises |
 | `create_company` | ● | Entreprise |
@@ -1073,12 +1163,20 @@ numérique — c'est tout ce que `list_email_templates`/`list_page_templates` ex
 MJML : le compilateur officiel tourne en Node (`dev/build-templates.sh`) ou, côté builder Mautic,
 dans le navigateur (`grapesjs-mjml`) — aucune des deux options n'est disponible pour une
 sauvegarde faite depuis un formulaire serveur, et le plugin n'ajoute pas de dépendance Node pour
-ça. Un template d'email s'écrit donc directement en HTML, exactement comme un template de landing
-page ; les tokens Mautic (`{contactfield=...}`, `{unsubscribe_url}`...) fonctionnent à l'identique,
-ce sont de simples chaînes substituées par Mautic à l'envoi, indépendamment de la façon dont le
-HTML a été produit. Conséquence assumée : contrairement à l'ancien mécanisme (MJML source
-enregistré dans `bundle_grapesjsbuilder` à la création de l'email), un email créé depuis un
-template géré ici n'est plus éditable dans le builder MJML — seul le HTML brut.
+ça. Un template d'email s'écrit donc directement en HTML, structurellement comme un template de
+landing page (aucune compilation dans les deux cas, que le HTML soit écrit à la main ou produit par
+un template) : côté email, les tokens Mautic (`{contactfield=...}`, `{unsubscribe_url}`...)
+fonctionnent quelle que soit l'origine du HTML, ce sont de simples chaînes substituées par
+`MailHelper` à l'envoi. **Ne pas en déduire qu'ils fonctionnent pareil sur une landing page** :
+`{contactfield=...}` n'y est JAMAIS substitué (vérifié dans `PageBundle\Controller\PublicController` —
+aucune passe de remplacement des tokens de champ contact sur le HTML d'une page, contrairement à un
+email toujours adressé à un contact connu ; seul `{pagelink=...}` est un vrai token de page,
+`PageBundle\Helper\TokenHelper`, sans rapport). Pour personnaliser une landing page, seul le Dynamic
+Content de Mautic (blocs conditionnels par segment) ou du JavaScript côté client lisant le cookie de
+tracking fonctionnent — jamais un merge tag serveur. Conséquence assumée par ailleurs :
+contrairement à l'ancien mécanisme (MJML source enregistré dans `bundle_grapesjsbuilder` à la
+création de l'email), un email créé depuis un template géré ici n'est plus éditable dans le builder
+MJML — seul le HTML brut.
 
 **La substitution est faite par le plugin, pas par le modèle.** Demander à un LLM de recracher
 1 200 lignes de HTML compilé sans faute n'est pas fiable : il fournit le texte de chaque bloc,

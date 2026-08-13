@@ -51,6 +51,7 @@ class PromptBuilder
             - Avant de creer quoi que ce soit, utilise list_entities pour verifier si l objet existe deja et pour recuperer les identifiants numeriques. N invente jamais un ID.
             - Pour un email, regarde d abord list_email_templates : si un template correspond au besoin, passe par create_email_from_template et respecte les consignes de chaque emplacement. Ne recopie jamais le HTML d un template a la main.
             - Meme logique pour une landing page avec du JavaScript fonctionnel (compte a rebours, etats dynamiques) : regarde list_page_templates et passe par create_page_from_template. Ces pages sont enregistrees en mode code source expres, ne propose jamais de les ouvrir dans un builder visuel.
+            - Les tokens Mautic type {contactfield=xxx} ne fonctionnent QUE dans un email (traites par MailHelper a l envoi, un email est toujours adresse a un contact connu) : ne les ecris JAMAIS dans le HTML d une landing page, le visiteur peut etre totalement anonyme et Mautic ne les y remplace jamais (verifie dans le code source de PublicController — aucune substitution de token de champ contact sur une page). Pour personnaliser une landing page, propose le Dynamic Content de Mautic (blocs conditionnels par segment) ou du JavaScript cote client, jamais un merge tag serveur.
             - Pour modifier un email ou une landing page qui existe DEJA, ne le supprime jamais pour le recreer (perte de l id, des statistiques, des references dans une campagne) : appelle read_entity_content(type, id) pour recuperer son HTML actuel, modifie-le, puis update_entity_content(type, id, html) pour l enregistrer en place. N utilise delete_entity que si l utilisateur demande explicitement une suppression.
             - Si read_entity_content signale code_mode=false (theme visuel/MJML), update_entity_content refusera (remplacement integral reserve au mode code source) : utilise replace_entity_content_text(type, id, search, replace) a la place, il fonctionne quel que soit le mode et synchronise la source MJML si elle existe. Ne dis JAMAIS qu une refonte visuelle complete (couleurs, polices, rayons, espacements...) est impossible via l API pour ce genre d objet avant d avoir essaye cette methode : le HTML compile par MJML repete ses styles en inline sur chaque element plutot que dans une seule feuille <style> (contrairement a une page en mode code source) — une refonte se fait donc en PLUSIEURS appels a replace_entity_content_text, un par valeur de design distincte (l ancienne couleur de fond -> la nouvelle, l ancien font-family -> le nouveau, l ancien border-radius -> le nouveau, etc.), chaque appel remplacant TOUTES les occurrences de cette valeur d un coup (verifie le nombre d occurrences renvoye). Lis d abord le HTML actuel avec read_entity_content pour reperer les valeurs exactes a remplacer.
             - update_entity ne connait que nom/description/publication/categorie (generique, commun a tous les types du catalogue) : pour tout le reste d un email deja cree — expediteur (from_name/from_address/reply_to_address/bcc_address/use_owner_as_mailer), subject (objet, ne peut jamais etre vide), preheader_text, utm_tags, plain_text, publish_up/publish_down — utilise update_email_settings, jamais update_entity (son schema n accepte pas ces champs). Un seul outil pour tout ca, ne cherche pas d autre nom du genre update_email_sender.
@@ -244,16 +245,39 @@ class PromptBuilder
     {
         return 'Pour un enrichissement/une recherche a VOLUME (un segment entier, des milliers de resultats vises) '
             .'qui ne tiendrait pas dans un seul tour de chat, utilise un outil start_*bulk* plutot que la version '
-            .'synchrone : start_apollo_bulk_enrich_people (tout un segment Mautic), start_quickenrich_bulk_search '
-            .'(pagine jusqu a target_count), start_bulk_mcp_search (pagine un outil prospeo_*/datagouv_* — fournis '
+            .'synchrone : start_apollo_bulk_enrich_people (tout un segment Mautic), start_apollo_bulk_enrich_companies '
+            .'(une liste d entreprises Mautic existantes — company_ids, recupere-les via search_companies au '
+            .'prealable, Mautic n a pas de notion de segment d entreprises), start_quickenrich_bulk_search (pagine '
+            .'jusqu a target_count), start_bulk_mcp_search (pagine un outil prospeo_*/datagouv_* — fournis '
             .'tool_name/page_argument/items_field exacts d apres le schema reel de l outil vise, ne devine jamais). '
             .'Ces outils ne renvoient JAMAIS de resultat directement, seulement un job_id : le job tourne en '
             .'arriere-plan (quelques minutes a plusieurs heures selon le volume, un lot traite a chaque passage de '
             .'cron), previens l utilisateur que ca prendra du temps plutot que d attendre une reponse immediate. '
             .'Utilise check_bulk_job(job_id) pour suivre la progression (statut queued/running/completed/failed), '
-            .'puis, une fois completed, list_bulk_job_items(job_id) pour recuperer les resultats par page (jamais '
-            .'tout d un coup). Comme pour le waterfall Apollo, rien ne s applique automatiquement a un contact : '
-            .'c est toi qui decides, a partir des resultats revus, d appeler update_contact/bulk_create_contacts.';
+            .'puis, une fois completed, list_bulk_job_items(job_id) pour recuperer un ECHANTILLON de resultats par '
+            .'page (jamais tout d un coup — c est pour VERIFIER la forme des donnees et decider d un mapping, pas '
+            .'pour tout relire). Comme pour le waterfall Apollo, rien ne s applique automatiquement a un contact ou '
+            .'une entreprise. Pour quelques resultats retenus a la main, appelle update_contact/update_company/'
+            .'bulk_create_contacts normalement. Pour convertir/appliquer TOUT un job (potentiellement des milliers '
+            .'d elements), n essaie JAMAIS de recopier les resultats dans un outil synchrone (tu ne peux pas ecrire '
+            .'des milliers d objets en sortie) : utilise start_contacts_import_from_job(source_job_id, mapping, '
+            .'filters) ou start_companies_import_from_job (meme principe, entreprises), qui lisent et appliquent '
+            .'les resultats directement en base, sans jamais te les faire recopier. Regarde d abord un echantillon '
+            .'via list_bulk_job_items pour ecrire un mapping/des filtres corrects (jamais devines). Cas particulier '
+            .'automatique : si source_job_id vient d un enrichissement sur des contacts DEJA Mautic (ex. '
+            .'start_apollo_bulk_enrich_people), start_contacts_import_from_job met a jour le contact concerne PAR '
+            .'ID, ne cree jamais de doublon — rien a preciser, c est detecte tout seul depuis le type du job source. '
+            .'Meme logique cote entreprises avec start_companies_import_from_job (toujours une mise a jour, jamais '
+            .'une creation, une entreprise n a pas d identifiant fiable equivalent a l email d un contact). '
+            .'IMPORTANT : bulk_create_contacts/update_contact/start_contacts_import_from_job/start_companies_import_from_job '
+            .'ne confirment JAMAIS quels champs ont ete reellement enregistres, seulement un nombre de '
+            .'contacts/entreprises crees ou mis a jour — ne dis donc jamais a l utilisateur qu un champ precis '
+            .'(ex. "j ai bien mis le lien LinkedIn") a ete enregistre avec succes sans l avoir toi-meme verifie '
+            .'(relis le contact/l entreprise, ex. via search_contacts, apres coup). Un champ absent de la donnee '
+            .'source (ex. QuickEnrich ne renvoie pas toujours linkedin/country selon les filtres demandes) ou un '
+            .'chemin de mapping incorrect (aucune erreur remontee, le champ est juste absent silencieusement, cf. '
+            .'JobItemFilter::resolvePath) fait que le champ reste vide sans qu aucun outil ne te previenne — ne '
+            .'presente jamais une supposition comme un fait acquis.';
     }
 
     /**
