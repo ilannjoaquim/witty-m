@@ -127,7 +127,10 @@ class QuickenrichBulkEnrichPeopleJobHandlerTest extends TestCase
         $lead = $this->leadWithId(10);
 
         $quickenrich = $this->createMock(QuickenrichClient::class);
-        $quickenrich->method('get')->willThrowException(new QuickenrichException('HTTP 500'));
+        // Code 500 explicite : une vraie panne fournisseur, pas une donnee
+        // invalide propre a un contact (cf. testA422OnOneContactNeverStopsTheJob
+        // pour la distinction).
+        $quickenrich->method('get')->willThrowException(new QuickenrichException('QuickEnrich (HTTP 500) : erreur inconnue', 500));
 
         $recorded = [];
         $em       = $this->em([10], [$lead], ['10' => 'https://linkedin.com/in/x'], $recorded);
@@ -137,7 +140,90 @@ class QuickenrichBulkEnrichPeopleJobHandlerTest extends TestCase
         (new QuickenrichBulkEnrichPeopleJobHandler($quickenrich, $em))->processChunk($job);
 
         $this->assertSame(WittyBackgroundJob::STATUS_FAILED, $job->getStatus());
-        $this->assertSame('HTTP 500', $job->getErrorMessage());
+        $this->assertSame('QuickEnrich (HTTP 500) : erreur inconnue', $job->getErrorMessage());
+    }
+
+    /**
+     * Le point signale par l'utilisateur : QuickEnrich renvoie une 422 pour
+     * un contact dont la donnee est specifiquement invalide (ex. profil
+     * LinkedIn inexistant) — ca ne doit JAMAIS arreter tout le job, seulement
+     * cet element. Deux contacts dans le lot : le premier en 422, le second
+     * qui reussit normalement — le second doit bien etre traite.
+     */
+    public function testA422OnOneContactNeverStopsTheJob(): void
+    {
+        $badLead  = $this->leadWithId(10);
+        $goodLead = $this->leadWithId(11);
+
+        $quickenrich = $this->createMock(QuickenrichClient::class);
+        $quickenrich->method('get')->willReturnCallback(
+            static function (string $path, array $query) {
+                if ('https://linkedin.com/in/bad' === $query['linkedin_url']) {
+                    throw new QuickenrichException('QuickEnrich (HTTP 422) : profil introuvable', 422);
+                }
+
+                return ['data' => ['email' => 'good@acme.test', 'phone' => '+15550000']];
+            },
+        );
+
+        $recorded = [];
+        $em       = $this->em(
+            [10, 11],
+            [$badLead, $goodLead],
+            ['10' => 'https://linkedin.com/in/bad', '11' => 'https://linkedin.com/in/good'],
+            $recorded,
+        );
+
+        $job = (new WittyBackgroundJob())->setParams(['segment_id' => 1, 'reveal' => ['email', 'phone']]);
+
+        (new QuickenrichBulkEnrichPeopleJobHandler($quickenrich, $em))->processChunk($job);
+
+        // Le job dans son ensemble n'a jamais echoue.
+        $this->assertNotSame(WittyBackgroundJob::STATUS_FAILED, $job->getStatus());
+        $this->assertCount(2, $recorded);
+        $this->assertSame(WittyBackgroundJobItem::STATUS_FAILED, $recorded[0]->getStatus());
+        $this->assertSame('10', $recorded[0]->getExternalRef());
+        $this->assertSame(WittyBackgroundJobItem::STATUS_SUCCEEDED, $recorded[1]->getStatus());
+        $this->assertSame('11', $recorded[1]->getExternalRef());
+    }
+
+    public function testAccentedLinkedinUrlIsTransliteratedBeforeCallingQuickenrich(): void
+    {
+        $lead = $this->leadWithId(10);
+
+        $quickenrich = $this->createMock(QuickenrichClient::class);
+        $quickenrich->expects($this->once())->method('get')
+            ->with('/employees/search', ['linkedin_url' => 'https://linkedin.com/in/francois-lefevre'])
+            ->willReturn(['data' => ['email' => 'francois@acme.test']]);
+
+        $recorded = [];
+        $em       = $this->em([10], [$lead], ['10' => 'https://linkedin.com/in/françois-lefèvre'], $recorded);
+
+        $job = (new WittyBackgroundJob())->setParams(['segment_id' => 1, 'reveal' => ['email']]);
+
+        (new QuickenrichBulkEnrichPeopleJobHandler($quickenrich, $em))->processChunk($job);
+
+        $this->assertSame(WittyBackgroundJobItem::STATUS_SUCCEEDED, $recorded[0]->getStatus());
+    }
+
+    public function testValueWithoutHttpIsSkippedWithoutAnyApiCall(): void
+    {
+        $lead = $this->leadWithId(10);
+
+        $quickenrich = $this->createMock(QuickenrichClient::class);
+        $quickenrich->expects($this->never())->method('get');
+
+        $recorded = [];
+        // Pas d'URL du tout : un nom d'utilisateur LinkedIn mal renseigne, ou
+        // une donnee source corrompue.
+        $em = $this->em([10], [$lead], ['10' => 'jean-dupont'], $recorded);
+
+        $job = (new WittyBackgroundJob())->setParams(['segment_id' => 1, 'reveal' => ['email', 'phone']]);
+
+        (new QuickenrichBulkEnrichPeopleJobHandler($quickenrich, $em))->processChunk($job);
+
+        $this->assertCount(1, $recorded);
+        $this->assertSame(WittyBackgroundJobItem::STATUS_SKIPPED, $recorded[0]->getStatus());
     }
 
     private function leadWithId(int $id): Lead

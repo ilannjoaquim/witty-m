@@ -472,6 +472,23 @@ révéler l'email/téléphone de plusieurs milliers de contacts déjà importés
   ajouté à `ImportContactsFromJobHandler::CONTACT_ID_MATCHED_SOURCE_TYPES` : `start_contacts_import_from_job`
   détecte donc automatiquement, comme pour Apollo, qu'un job source issu de cet enrichissement doit
   être appliqué par **id de contact**, jamais par dédoublonnage email — rien à préciser à l'agent.
+- **QuickEnrich est strict sur la forme de `linkedin_url`, deux garde-fous ajoutés après un premier
+  passage en session** :
+  - **Accents translitérés en ASCII avant tout appel** (`normalizeLinkedinUrl()`, `iconv('UTF-8',
+    'ASCII//TRANSLIT//IGNORE', ...)`) — un caractère accentué fait échouer la requête en HTTP 422 côté
+    QuickEnrich. Vérifié contre la vraie base locale : un lien `françois-tèst` correctement transformé
+    en `francois-test` avant l'appel, jamais rejeté.
+  - **Une valeur qui n'est manifestement pas une URL** (pas de préfixe `http://`/`https://`) est
+    écartée **avant même d'appeler QuickEnrich** (`status=skipped`), jamais envoyée pour rien.
+  - **Un HTTP 422 malgré tout reste possible** (donnée spécifiquement invalide pour CE contact, ex.
+    profil LinkedIn supprimé depuis) — bug réel repéré en session : la première version faisait
+    échouer **tout le job** pour une seule requête en erreur, alors qu'un 422 ne dit rien des autres
+    contacts du lot. `QuickenrichException::getCode()` porte désormais le code HTTP réel (propagé
+    depuis `QuickenrichClient::request()`, absent avant ce correctif) : seuls les codes
+    spécifiques-à-la-requête (400/422, `QuickenrichBulkEnrichPeopleJobHandler::PER_ITEM_ERROR_CODES`)
+    tracent cet élément en échec et continuent le lot ; une vraie panne fournisseur (401/429/5xx/timeout,
+    code 0 ou hors de cette liste) fait toujours échouer le job entier — reprenable ensuite via
+    `resume_bulk_job`, jamais une raison de perdre la distinction entre les deux cas.
 
 ### Données publiques (data.gouv.fr, MCP)
 

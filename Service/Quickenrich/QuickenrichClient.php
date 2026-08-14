@@ -78,7 +78,12 @@ class QuickenrichClient
         if ($status >= 400) {
             $message = is_array($decoded) ? (string) ($decoded['message'] ?? $body) : trim($body);
 
-            throw new QuickenrichException(sprintf('QuickEnrich (HTTP %d) : %s', $status, '' !== $message ? $message : 'erreur inconnue'));
+            // Code HTTP porte par l'exception (pas seulement dans le message) :
+            // permet a un appelant de distinguer une erreur specifique a CETTE
+            // requete (422 : donnee invalide, ex. QuickenrichBulkEnrichPeopleJobHandler
+            // qui ne doit jamais arreter tout un job pour UN seul contact mal
+            // forme) d'une vraie panne fournisseur (401/429/5xx).
+            throw new QuickenrichException(sprintf('QuickEnrich (HTTP %d) : %s', $status, '' !== $message ? $message : 'erreur inconnue'), $status);
         }
 
         return is_array($decoded) ? $decoded : [];

@@ -45,12 +45,31 @@ use MauticPlugin\WittyBundle\Service\Quickenrich\QuickenrichClient;
  * reste neanmoins modere pour ne jamais risquer de depasser le budget de
  * temps d'un passage de cron (chaque appel est une vraie latence reseau, pas
  * un cout marginal negligeable).
+ *
+ * QuickEnrich est strict sur la forme de linkedin_url (constate en session) :
+ * - un caractere accentue (jamais cense se retrouver dans une URL LinkedIn,
+ *   mais un import/une source tierce peut en laisser passer) fait echouer la
+ *   requete en HTTP 422 -> transliteres en ASCII avant tout appel
+ *   (normalizeLinkedinUrl()) plutot que d'echouer pour rien sur un contact
+ *   par ailleurs valide.
+ * - une valeur qui n'est manifestement pas une URL (pas de http:// ni
+ *   https://) est ecartee AVANT meme d'appeler QuickEnrich, meme raisonnement
+ *   que l'absence de lien : ne jamais envoyer une requete vouee a l'echec.
+ * - un HTTP 422 malgre tout (donnee specifiquement invalide pour CE contact,
+ *   ex. profil LinkedIn inexistant) ne doit PAS faire echouer tout le job —
+ *   contrairement a une vraie panne fournisseur (401/429/5xx/timeout), ou
+ *   arreter le job reste correct (cf. resume_bulk_job pour reprendre
+ *   proprement). Seul ce dernier cas de figure fait echouer le job entier ;
+ *   un 422 est trace comme un echec de CET element et le lot continue.
  */
 class QuickenrichBulkEnrichPeopleJobHandler implements JobHandlerInterface
 {
     public const TYPE = 'quickenrich_bulk_enrich_people';
 
     private const BATCH_SIZE = 40;
+
+    /** Codes HTTP QuickEnrich specifiques a UNE requete (donnee invalide) : n'arretent jamais tout le job. */
+    private const PER_ITEM_ERROR_CODES = [400, 422];
 
     public function __construct(
         private QuickenrichClient $quickenrich,
@@ -93,41 +112,54 @@ class QuickenrichBulkEnrichPeopleJobHandler implements JobHandlerInterface
         $linkedinByLead = $this->fetchLinkedinUrls($leadIds);
 
         foreach ($leads as $lead) {
-            $linkedinUrl = trim((string) ($linkedinByLead[$lead->getId()] ?? ''));
+            $rawLinkedinUrl = trim((string) ($linkedinByLead[$lead->getId()] ?? ''));
 
-            if ('' === $linkedinUrl) {
+            if ('' === $rawLinkedinUrl) {
                 $this->recordItem($job, (string) $lead->getId(), WittyBackgroundJobItem::STATUS_SKIPPED, null, 'Aucun lien LinkedIn sur ce contact (obligatoire pour cet enrichissement en masse).');
                 continue;
             }
 
-            $found = [];
+            $linkedinUrl = $this->normalizeLinkedinUrl($rawLinkedinUrl);
 
-            try {
-                if ($wantEmail) {
-                    $response = $this->quickenrich->get('/employees/search', ['linkedin_url' => $linkedinUrl]);
-                    $email    = trim((string) ($response['data']['email'] ?? ''));
+            if (null === $linkedinUrl) {
+                $this->recordItem($job, (string) $lead->getId(), WittyBackgroundJobItem::STATUS_SKIPPED, null, sprintf('Lien LinkedIn invalide (pas une URL http/https exploitable) : "%s".', $rawLinkedinUrl));
+                continue;
+            }
 
-                    if ('' !== $email) {
-                        $found['email'] = $email;
+            $found      = [];
+            $lastError  = null;
+
+            foreach (array_filter([
+                'email' => $wantEmail ? '/employees/search' : null,
+                'phone' => $wantPhone ? '/employees/phone-search' : null,
+            ]) as $target => $path) {
+                try {
+                    $response = $this->quickenrich->get($path, ['linkedin_url' => $linkedinUrl]);
+                    $value    = trim((string) ($response['data'][$target] ?? ''));
+
+                    if ('' !== $value) {
+                        $found[$target] = $value;
                     }
-                }
+                } catch (QuickenrichException $e) {
+                    if (!in_array($e->getCode(), self::PER_ITEM_ERROR_CODES, true)) {
+                        // Panne fournisseur reelle (pas une donnee invalide
+                        // propre a ce contact) : le lot entier ne peut plus
+                        // avancer de facon fiable, on arrete le job (reprenable
+                        // ensuite via resume_bulk_job).
+                        $job->setStatus(WittyBackgroundJob::STATUS_FAILED)->setErrorMessage($e->getMessage());
 
-                if ($wantPhone) {
-                    $response = $this->quickenrich->get('/employees/phone-search', ['linkedin_url' => $linkedinUrl]);
-                    $phone    = trim((string) ($response['data']['phone'] ?? ''));
-
-                    if ('' !== $phone) {
-                        $found['phone'] = $phone;
+                        return;
                     }
-                }
-            } catch (QuickenrichException $e) {
-                $job->setStatus(WittyBackgroundJob::STATUS_FAILED)->setErrorMessage($e->getMessage());
 
-                return;
+                    // Erreur specifique a CE contact (422 typiquement) : ne
+                    // compromet pas les autres cibles (email/phone) ni les
+                    // autres contacts du lot, juste tracee pour celui-ci.
+                    $lastError = $e->getMessage();
+                }
             }
 
             if ([] === $found) {
-                $this->recordItem($job, (string) $lead->getId(), WittyBackgroundJobItem::STATUS_FAILED, null, 'Aucune donnee trouvee par QuickEnrich pour ce lien LinkedIn.');
+                $this->recordItem($job, (string) $lead->getId(), WittyBackgroundJobItem::STATUS_FAILED, null, $lastError ?? 'Aucune donnee trouvee par QuickEnrich pour ce lien LinkedIn.');
                 continue;
             }
 
@@ -140,6 +172,24 @@ class QuickenrichBulkEnrichPeopleJobHandler implements JobHandlerInterface
         if (count($leadIds) < self::BATCH_SIZE) {
             $job->setStatus(WittyBackgroundJob::STATUS_COMPLETED);
         }
+    }
+
+    /**
+     * Translitere les caracteres accentues en ASCII (QuickEnrich renvoie une
+     * 422 sinon, constate en session) puis verifie qu'il s'agit bien d'une
+     * URL http(s) exploitable. Renvoie null si la valeur n'est manifestement
+     * pas une URL LinkedIn valide : jamais envoyee a QuickEnrich dans ce cas.
+     */
+    private function normalizeLinkedinUrl(string $rawUrl): ?string
+    {
+        $transliterated = iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $rawUrl);
+        $url            = false !== $transliterated ? trim($transliterated) : $rawUrl;
+
+        if (!str_starts_with($url, 'http://') && !str_starts_with($url, 'https://')) {
+            return null;
+        }
+
+        return $url;
     }
 
     /**
