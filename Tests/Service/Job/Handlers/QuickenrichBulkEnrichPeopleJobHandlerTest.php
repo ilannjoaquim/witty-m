@@ -32,11 +32,51 @@ use ReflectionProperty;
  */
 class QuickenrichBulkEnrichPeopleJobHandlerTest extends TestCase
 {
-    public function testDoesNotAllowMultiplePassesPerTick(): void
+    public function testAllowsMultiplePassesPerTick(): void
     {
+        // Exception justifiee (cf. docblock de classe) au defaut "false" des
+        // autres handlers a fournisseur externe : le debit QuickEnrich
+        // (1000/minute) est precisement connu et auto-applique en interne
+        // (throttle), donc plusieurs passages enchaines restent surs.
         $handler = new QuickenrichBulkEnrichPeopleJobHandler($this->createMock(QuickenrichClient::class), $this->createMock(EntityManagerInterface::class));
 
-        $this->assertFalse($handler->allowsMultiplePassesPerTick());
+        $this->assertTrue($handler->allowsMultiplePassesPerTick());
+    }
+
+    /**
+     * Le point qui garantit qu'on ne depasse jamais le debit QuickEnrich
+     * meme dans le pire cas (fournisseur anormalement rapide a repondre) :
+     * un vrai delai mesurable entre deux appels consecutifs, jamais suppose
+     * couvert par la seule latence reseau naturelle.
+     */
+    public function testThrottleEnforcesAMinimumDelayBetweenConsecutiveCalls(): void
+    {
+        $leadA = $this->leadWithId(10);
+        $leadB = $this->leadWithId(11);
+
+        $quickenrich = $this->createMock(QuickenrichClient::class);
+        $quickenrich->method('get')->willReturn(['data' => ['email' => 'x@acme.test']]);
+
+        $recorded = [];
+        $em       = $this->em(
+            [10, 11],
+            [$leadA, $leadB],
+            ['10' => 'https://linkedin.com/in/a', '11' => 'https://linkedin.com/in/b'],
+            $recorded,
+        );
+
+        $job = (new WittyBackgroundJob())->setParams(['segment_id' => 1, 'reveal' => ['email']]);
+
+        $start = microtime(true);
+        (new QuickenrichBulkEnrichPeopleJobHandler($quickenrich, $em))->processChunk($job);
+        $elapsed = microtime(true) - $start;
+
+        // Deux appels (un par contact), donc au moins un intervalle attendu.
+        // Marge large (40ms) sous les 65ms reels pour ne jamais etre fragile
+        // sur une machine lente, tout en detectant sans ambiguite une
+        // regression qui supprimerait completement le throttle (elapsed
+        // proche de 0).
+        $this->assertGreaterThan(0.04, $elapsed);
     }
 
     public function testLeadWithoutLinkedinIsSkippedWithoutAnyApiCall(): void

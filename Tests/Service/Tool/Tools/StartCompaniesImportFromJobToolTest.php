@@ -85,6 +85,22 @@ class StartCompaniesImportFromJobToolTest extends TestCase
         $this->assertTrue($output['partial']);
     }
 
+    public function testCancelledSourceJobWithSucceededItemsIsAcceptedAsAPartialImport(): void
+    {
+        $owner = $this->userWithId(1);
+        $sourceJob = (new WittyBackgroundJob())->setType('x')->setLabel('L')->setCreatedBy($owner)->setStatus(WittyBackgroundJob::STATUS_CANCELLED);
+
+        $em = $this->emStub($sourceJob, 500);
+        $config = $this->createMock(WittyConfig::class);
+        $config->method('requiresConfirmation')->willReturn(false);
+
+        $tool = new StartCompaniesImportFromJobTool($em, $this->userHelper($owner), $config, $this->guard());
+        $output = $tool->execute(['source_job_id' => 1, 'mapping' => ['companyindustry' => 'industry']]);
+
+        $this->assertSame('ok', $output['status']);
+        $this->assertTrue($output['partial']);
+    }
+
     public function testFailedSourceJobWithNoSucceededItemsIsStillRejected(): void
     {
         $owner = $this->userWithId(1);

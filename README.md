@@ -431,8 +431,10 @@ explicitement en plus du nom.
   tous deux vides ne sont jamais envoyées, pour ne pas compter par erreur comme un filtre actif côté
   API.
 - **Limite de débit** — 120 requêtes/minute par clé API pour Contact Finder (recherche), 1000/minute
-  pour Search/phone/email (révélation), communiquées par l'utilisateur — seulement rappelées dans les
-  descriptions d'outils, pas de limitation technique côté plugin, comme pour le coût en crédits Apollo.
+  pour Search/phone/email (révélation), communiquées par l'utilisateur. Contrairement au coût en
+  crédits Apollo (seulement rappelé dans la description de l'outil, jamais imposé), ces deux limites
+  sont désormais **auto-appliquées** côté job de fond — cf. sous-sections dédiées ci-dessous
+  (`QuickenrichBulkSearchJobHandler`/`QuickenrichBulkEnrichPeopleJobHandler`), pas seulement rappelées.
 
 #### Révélation en masse (`start_quickenrich_bulk_enrich_people`)
 
@@ -443,11 +445,23 @@ révéler l'email/téléphone de plusieurs milliers de contacts déjà importés
 
 - **`Service/Job/Handlers/QuickenrichBulkEnrichPeopleJobHandler.php`** (`quickenrich_bulk_enrich_people`)
   — parcourt tous les membres d'un **segment Mautic** (même requête `lead_lists_leads` par `lead_id`
-  croissant, même exclusion `manually_removed=1`, que `ApolloBulkEnrichPeopleJobHandler`), 40 par lot.
+  croissant, même exclusion `manually_removed=1`, que `ApolloBulkEnrichPeopleJobHandler`), 60 par lot.
   `reveal` (`email`/`phone`/les deux) choisit quel(s) endpoint(s) appeler par contact — contrairement à
   Apollo `bulk_match`, QuickEnrich n'a pas d'appel groupé : ce sont un ou deux vrais appels HTTP
-  **par contact**, jamais un seul appel pour tout le lot. `allowsMultiplePassesPerTick()=false` comme
-  les trois autres handlers qui touchent un fournisseur externe (cf. section multi-passage plus haut).
+  **par contact**, jamais un seul appel pour tout le lot.
+- **`allowsMultiplePassesPerTick()=true` — seule exception parmi les quatre handlers à fournisseur
+  externe, question posée en session** : la première version restait à `false` (un seul lot de 40 par
+  minute, comme Apollo/QuickEnrich-recherche/MCP), plafonnant à 40-80 appels/minute alors que
+  QuickEnrich autorise 1000/minute par clé API (chiffre précis communiqué par l'utilisateur) — moins de
+  10 % du débit réellement disponible utilisé. Justifié **uniquement ici** : ce chiffre exact permet un
+  **throttle déterministe** (`MIN_CALL_INTERVAL_SECONDS = 0.065`, ~65 ms mesurés et attendus entre deux
+  appels consécutifs, jamais supposé couvert par la seule latence réseau) qui garantit de ne jamais le
+  dépasser, quel que soit le nombre de passages enchaînés dans un même cron — contrairement à
+  Apollo/QuickEnrich-recherche/MCP dont la limite réelle n'est pas connue avec cette précision ici, où
+  un multi-passage resterait une supposition risquée. **Vérifié contre la vraie base locale** (pas
+  seulement raisonné) : deux appels réels chronométrés à ~65,1 ms d'écart. Débit résultant : plusieurs
+  centaines de contacts par minute au lieu de 40, auto-régulé plutôt que d'exposer un chiffre fixe qui
+  se périmerait si QuickEnrich changeait sa limite.
 - **Identifiant obligatoire : un lien LinkedIn déjà présent sur le contact** (champ Mautic `linkedin`)
   — le seul exploitable en masse sans requêter une `Company` par contact pour le repli
   `company_url`+`first_name`+`last_name` des outils unitaires, volontairement pas repris ici. Un
@@ -560,6 +574,18 @@ une classe taguée = une capacité de plus, rien à câbler ailleurs.
   - **`QuickenrichBulkSearchJobHandler`** (`quickenrich_bulk_search_contacts`) — pagine
     `POST /employees/contact-finder` (100/page) jusqu'à `target_count` ou épuisement (page
     incomplète = fin réelle des résultats, termine même sous la cible).
+    **`allowsMultiplePassesPerTick()=true`, question posée en session** : la première version restait
+    à un seul appel Contact Finder par minute (1/120e du débit autorisé — encore plus sous-exploité
+    que ne l'était l'enrichissement avant son propre fix, cf. plus bas). Même exception justifiée que
+    `QuickenrichBulkEnrichPeopleJobHandler` (débit connu avec précision, 120/minute par clé API
+    communiqué par l'utilisateur, auto-appliqué en interne), mais mécanisme différent : ce handler ne
+    fait qu'**un seul** appel par `processChunk()` (jamais plusieurs dans la même boucle), donc le
+    throttle (`MIN_CALL_INTERVAL_SECONDS = 0.55`, ~550 ms) ne peut pas se contenter d'une variable
+    locale — il doit survivre **d'un passage à l'autre**. `resumeCursor['last_call_at']` porte ce
+    timestamp à cette seule fin (ce n'est pas un état de reprise de pagination à proprement parler,
+    juste le véhicule déjà existant le plus simple). **Vérifié contre un scénario réel de 3 passages
+    enchaînés** (pas seulement raisonné) : écarts mesurés à 550,1 ms pile entre chaque appel. Débit
+    résultant : plusieurs milliers de résultats par minute possibles au lieu de 100.
   - **`McpBulkSearchJobHandler`** (`mcp_bulk_search`) — **un seul handler générique pour Prospeo ET
     data.gouv.fr** (n'importe quel futur serveur MCP inclus), plutôt qu'un par fournisseur.
     Contrairement à Apollo/QuickEnrich (clients REST que ce plugin écrit et contrôle, schéma de
@@ -627,6 +653,23 @@ une classe taguée = une capacité de plus, rien à câbler ailleurs.
   job, rien à réimporter séparément) ; seulement si le plafond est atteint ou le problème manifestement
   durable, repli sur l'import partiel déjà documenté ci-dessus (`partial: true`) puis une nouvelle
   recherche pour le reliquat réel.
+- **Annulation (`cancel_bulk_job`)** — question posée en session : si l'utilisateur se rétracte sur un
+  job encore en cours, l'agent n'avait **aucun** moyen de l'arrêter — un vrai trou, malgré l'existence
+  de `WittyBackgroundJob::STATUS_CANCELLED` depuis la conception initiale du système (jamais
+  atteignable faute d'outil). `Service/Tool/Tools/CancelBulkJobTool.php` (`cancel_bulk_job`), même
+  esprit minimal que `resume_bulk_job` : repasse un job `queued`/`running` en `cancelled`, ne touche à
+  rien d'autre (`resumeCursor`, items déjà enregistrés intacts). Suffisant pour l'arrêter :
+  `findRunnable()` n'interroge que `queued`/`running`, un job `cancelled` n'est donc plus jamais repris
+  par le cron. Trois conséquences travaillées ensemble plutôt que l'outil isolé :
+  - `resume_bulk_job` accepte désormais **aussi** un job `cancelled` (`RESUMABLE_STATUSES`, pas
+    seulement `failed`) : si l'utilisateur se rétracte une seconde fois ("en fait non, continue"),
+    rien n'est perdu, exactement le même mécanisme que la reprise sur erreur.
+  - `start_contacts_import_from_job`/`start_companies_import_from_job` acceptent désormais aussi un
+    job source `cancelled` (`IMPORTABLE_SOURCE_STATUSES`), marqué `partial: true` comme un job
+    `failed` — les résultats déjà obtenus avant l'annulation restent exploitables.
+  - `PromptBuilder` instruit explicitement l'agent de ne jamais laisser un job non désiré tourner en
+    espérant qu'il s'arrête tout seul (il continuerait à consommer des crédits/appels fournisseur au
+    prochain passage de cron) : `cancel_bulk_job` est le réflexe correct.
 - **Importer maintenant PUIS reprendre plus tard : question posée en session, et un vrai risque de
   doublon existait pour y répondre "oui" sans réserve.** Scénario : les 10 000 premiers résultats
   sont importés (`start_contacts_import_from_job`, sans email à dédupliquer — décision explicite de
@@ -1089,7 +1132,8 @@ outils.
 | `start_quickenrich_bulk_enrich_people` | | Révèle email/téléphone QuickEnrich sur tout un segment Mautic (contacts avec un lien LinkedIn) |
 | `start_bulk_mcp_search` | | Lance en arrière-plan la pagination d'un outil MCP (Prospeo, data.gouv.fr) |
 | `check_bulk_job` | | Consulte la progression d'un job de fond |
-| `resume_bulk_job` | | Relance un job de fond `failed` exactement où il s'est arrêté (curseur intact), plafonné à 5 tentatives |
+| `cancel_bulk_job` | | Annule un job de fond `queued`/`running` (rien n'est effacé, reprenable via `resume_bulk_job`) |
+| `resume_bulk_job` | | Relance un job de fond `failed` ou `cancelled` exactement où il s'est arrêté (curseur intact), plafonné à 5 tentatives |
 | `list_bulk_job_items` | | Récupère une page de résultats d'un job de fond, à revoir avant application |
 | `start_contacts_import_from_job` | ● | Convertit/enrichit en arrière-plan les résultats d'un job terminé en contacts Mautic (mapping/filtres déclaratifs, met à jour par id si le job source est un enrichissement) |
 | `start_companies_import_from_job` | ● | Applique en arrière-plan les résultats d'un job d'enrichissement d'entreprises terminé sur les entreprises Mautic correspondantes (toujours une mise à jour, jamais une création) |

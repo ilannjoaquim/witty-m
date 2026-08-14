@@ -41,11 +41,12 @@ class CheckBulkJobTool extends AbstractTool
         return 'Consulte la progression d un job de fond (lance par start_apollo_bulk_enrich_people, '
             .'start_quickenrich_bulk_search ou start_bulk_mcp_search). job_id pour un job precis, ou rien pour '
             .'lister tes jobs recents (status filtre optionnel : queued/running/completed/failed/cancelled). '
-            .'Un job status=failed avec succeeded_items > 0 reste exploitable : ne le traite pas comme perdu. '
-            .'Deux options, pas besoin de relancer toute la recherche depuis le debut : resume_bulk_job pour '
-            .'reprendre le job source lui-meme la ou il s est arrete (utile si error_message ressemble a un '
-            .'incident ponctuel du fournisseur), ou start_contacts_import_from_job/start_companies_import_from_job '
-            .'pour deja convertir ce qui a ete obtenu.';
+            .'Un job status=failed OU status=cancelled avec succeeded_items > 0 reste exploitable : ne le traite pas '
+            .'comme perdu. Options, pas besoin de relancer toute la recherche depuis le debut : resume_bulk_job pour '
+            .'reprendre le job (source d un incident fournisseur ponctuel, OU une annulation dont l utilisateur '
+            .'revient), cancel_bulk_job si l utilisateur se retracte sur un job encore queued/running, ou '
+            .'start_contacts_import_from_job/start_companies_import_from_job pour deja convertir ce qui a ete '
+            .'obtenu.';
     }
 
     public function getObjectType(): ?string

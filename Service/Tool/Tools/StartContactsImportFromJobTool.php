@@ -31,18 +31,23 @@ use MauticPlugin\WittyBundle\Service\WittyConfig;
  * doivent passer), operateurs fixes plutot que du code libre — voir
  * Service/Job/JobItemFilter.php.
  *
- * Un job source FAILED reste exploitable : un plantage en cours de route
- * (ex. QuickEnrich qui casse a 10 000/23 603) laisse quand meme les items deja
+ * Un job source FAILED ou CANCELLED reste exploitable : un plantage en cours
+ * de route (ex. QuickEnrich qui casse a 10 000/23 603) ou une annulation
+ * manuelle (cf. CancelBulkJobTool) laissent quand meme les items deja
  * enregistres en status=succeeded, valides individuellement. Un job source
- * echoue est donc accepte au meme titre qu'un completed, tant qu'il a au
- * moins un resultat exploitable — seul un job encore QUEUED/RUNNING est
- * refuse (encore en train d'ecrire, rien de definitif a lire).
+ * dans l un de ces deux etats est donc accepte au meme titre qu'un completed,
+ * tant qu'il a au moins un resultat exploitable — seul un job encore
+ * QUEUED/RUNNING est refuse (encore en train d'ecrire, rien de definitif a
+ * lire).
  */
 class StartContactsImportFromJobTool extends AbstractTool
 {
     private const FILTER_OPS = ['has_field', 'field_not_empty', 'field_empty', 'field_equals', 'field_not_equals', 'field_matches'];
 
-    private const IMPORTABLE_SOURCE_STATUSES = [WittyBackgroundJob::STATUS_COMPLETED, WittyBackgroundJob::STATUS_FAILED];
+    private const IMPORTABLE_SOURCE_STATUSES = [WittyBackgroundJob::STATUS_COMPLETED, WittyBackgroundJob::STATUS_FAILED, WittyBackgroundJob::STATUS_CANCELLED];
+
+    /** Sous-ensemble de IMPORTABLE_SOURCE_STATUSES qui declenche un import marque partial:true. */
+    private const PARTIAL_SOURCE_STATUSES = [WittyBackgroundJob::STATUS_FAILED, WittyBackgroundJob::STATUS_CANCELLED];
 
     public function __construct(
         private EntityManagerInterface $entityManager,
@@ -77,8 +82,8 @@ class StartContactsImportFromJobTool extends AbstractTool
             .'avant pour voir la forme exacte des donnees. filters (optionnel) : regles combinees en ET, operateurs '
             .'has_field/field_not_empty/field_empty/field_equals/field_not_equals/field_matches (regex) — pour '
             .'ecarter les lignes sans interet (ex. QuickEnrich sans email ni telephone) avant creation. Un job '
-            .'source failed reste utilisable (les resultats deja obtenus avant le plantage sont exploitables), '
-            .'seul un job encore en cours (queued/running) est refuse.';
+            .'source failed ou cancelled reste utilisable (les resultats deja obtenus avant le plantage/l annulation '
+            .'sont exploitables), seul un job encore en cours (queued/running) est refuse.';
     }
 
     public function getRequiredPermission(): ?string
@@ -94,7 +99,7 @@ class StartContactsImportFromJobTool extends AbstractTool
     public function getSchema(): array
     {
         return $this->schema([
-            'source_job_id' => ['type' => 'integer', 'description' => 'Job de recherche deja termine (status=completed ou failed) dont les resultats seront importes.'],
+            'source_job_id' => ['type' => 'integer', 'description' => 'Job de recherche deja termine (status=completed, failed ou cancelled) dont les resultats seront importes.'],
             'mapping'       => ['type' => 'object', 'description' => 'alias_champ_contact -> chemin (notation pointee) dans les donnees du job source.'],
             'filters'       => [
                 'type'        => 'array',
@@ -158,7 +163,7 @@ class StartContactsImportFromJobTool extends AbstractTool
         $sourceStatus = $sourceJob->getStatus();
 
         if (!in_array($sourceStatus, self::IMPORTABLE_SOURCE_STATUSES, true)) {
-            return ['status' => 'error', 'error' => sprintf('Job source #%d n est pas termine (status=%s) : attends qu il passe a completed (ou failed, un echec en cours de route reste exploitable pour les resultats deja obtenus).', $sourceJobId, $sourceStatus)];
+            return ['status' => 'error', 'error' => sprintf('Job source #%d n est pas termine (status=%s) : attends qu il passe a completed (un job failed ou cancelled reste exploitable pour les resultats deja obtenus).', $sourceJobId, $sourceStatus)];
         }
 
         /** @var WittyBackgroundJobItemRepository $itemRepository */
@@ -184,7 +189,7 @@ class StartContactsImportFromJobTool extends AbstractTool
             }
         }
 
-        $partial = WittyBackgroundJob::STATUS_FAILED === $sourceStatus;
+        $partial = in_array($sourceStatus, self::PARTIAL_SOURCE_STATUSES, true);
 
         if ($this->config->requiresConfirmation() && true !== ($arguments['confirmed'] ?? false)) {
             return $this->confirmationRequired(array_filter([
@@ -195,8 +200,9 @@ class StartContactsImportFromJobTool extends AbstractTool
                 'filters'       => [] !== $filters ? $filters : null,
                 'segment'       => $segment?->getName(),
                 // Signale explicitement un import PARTIEL (job source echoue
-                // en cours de route) : l'utilisateur doit le savoir avant de
-                // valider, ce n'est pas la totalite de ce qui etait vise.
+                // ou annule en cours de route) : l'utilisateur doit le savoir
+                // avant de valider, ce n'est pas la totalite de ce qui etait
+                // vise.
                 'partial'       => $partial ? true : null,
                 'source_status' => $partial ? $sourceStatus : null,
             ], static fn ($value): bool => null !== $value));
@@ -230,7 +236,7 @@ class StartContactsImportFromJobTool extends AbstractTool
                 .'Utilise check_bulk_job(job_id=%d) pour suivre la progression.',
                 $job->getId(),
                 $available,
-                $partial ? ' — import PARTIEL, le job source a echoue avant sa cible' : '',
+                $partial ? sprintf(' — import PARTIEL, le job source est %s avant sa cible', WittyBackgroundJob::STATUS_CANCELLED === $sourceStatus ? 'annule' : 'en echec') : '',
                 $job->getId(),
             ),
         ]);

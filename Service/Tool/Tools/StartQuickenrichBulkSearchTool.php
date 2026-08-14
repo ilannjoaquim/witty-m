@@ -127,7 +127,8 @@ class StartQuickenrichBulkSearchTool extends AbstractTool
         return $this->ok([
             'job_id'  => $job->getId(),
             'message' => sprintf(
-                'Job #%d lance en arriere-plan (jusqu a %d resultats, ~100 par lot, un lot par passage de cron). '
+                'Job #%d lance en arriere-plan (jusqu a %d resultats, plusieurs milliers par minute possible — '
+                .'debit auto-regule sur la limite QuickEnrich, pas un simple lot par minute). '
                 .'Utilise check_bulk_job(job_id=%d) pour suivre la progression.',
                 $job->getId(),
                 $targetCount,

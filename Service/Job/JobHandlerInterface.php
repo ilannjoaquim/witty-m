@@ -23,8 +23,13 @@ interface JobHandlerInterface
     public function getType(): string;
 
     /**
-     * true UNIQUEMENT si ce handler n'appelle AUCUNE API externe a debit
-     * limite (Apollo/QuickEnrich/un serveur MCP) : dans ce cas,
+     * true si ce handler n'appelle AUCUNE API externe a debit limite, OU si
+     * son debit fournisseur est precisement connu ET auto-applique en
+     * interne (throttle deterministe entre appels, cf.
+     * QuickenrichBulkEnrichPeopleJobHandler et QuickenrichBulkSearchJobHandler
+     * — 1000 et 120 requetes/minute respectivement, communiques par le
+     * fournisseur, respectes via une pause calculee entre chaque appel,
+     * jamais supposee). Dans ces deux cas,
      * Command/ProcessBackgroundJobsCommand.php peut appeler processChunk()
      * plusieurs fois de suite sur ce meme job, tant qu'il reste du budget de
      * temps sur ce passage de cron, au lieu d'un seul lot. C'est ainsi que
@@ -33,9 +38,10 @@ interface JobHandlerInterface
      * appel CLI) — sauf que la, c'est borne au budget commun du cron partage
      * par tous les types de job, jamais un import qui monopolise
      * indefiniment le creneau. Pour un handler qui appelle un fournisseur
-     * externe, renvoyer false : plusieurs passages rapproches dans le meme
-     * cron risqueraient de taper la limite de debit du fournisseur bien plus
-     * vite qu'un rythme d'un lot par minute.
+     * externe SANS connaitre ni respecter sa limite de debit, renvoyer false
+     * reste le defaut : plusieurs passages rapproches dans le meme cron
+     * risqueraient sinon de la depasser bien plus vite qu'un rythme d'un lot
+     * par minute.
      */
     public function allowsMultiplePassesPerTick(): bool;
 

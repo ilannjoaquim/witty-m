@@ -38,13 +38,19 @@ use MauticPlugin\WittyBundle\Service\Quickenrich\QuickenrichClient;
  * qui hydrate tous les groupes de champs) juste pour cette seule valeur.
  *
  * Chaque contact declenche un ou deux vrais appels HTTP QuickEnrich (email
- * et/ou telephone, jamais un seul appel groupe comme Apollo bulk_match) :
- * allowsMultiplePassesPerTick()=false comme les trois autres handlers qui
- * touchent un fournisseur externe. Debit fournisseur tres genereux (1000
- * requetes/minute par cle API, communique par l'utilisateur) : BATCH_SIZE
- * reste neanmoins modere pour ne jamais risquer de depasser le budget de
- * temps d'un passage de cron (chaque appel est une vraie latence reseau, pas
- * un cout marginal negligeable).
+ * et/ou telephone, jamais un seul appel groupe comme Apollo bulk_match).
+ *
+ * allowsMultiplePassesPerTick()=true, EXCEPTION au defaut "false" des autres
+ * handlers qui touchent un fournisseur externe (Apollo/QuickEnrich-recherche/
+ * MCP) : question posee en session (BATCH_SIZE=40 sur un seul lot par
+ * minute plafonnait a 40-80 appels/minute, alors que le fournisseur autorise
+ * 1000/minute par cle API — chiffre precis communique par l'utilisateur,
+ * jamais suppose). Justifie ICI et pas ailleurs parce que ce chiffre exact
+ * permet un throttle deterministe (MIN_CALL_INTERVAL_SECONDS, pause calculee
+ * entre deux appels consecutifs) qui GARANTIT de ne jamais le depasser, quel
+ * que soit le nombre de passages enchaines dans un meme cron — contrairement
+ * a Apollo/QuickEnrich-recherche/MCP dont la limite reelle n'est pas connue
+ * avec cette precision ici, un multi-passage y resterait une supposition.
  *
  * QuickEnrich est strict sur la forme de linkedin_url (constate en session) :
  * - un caractere accentue (jamais cense se retrouver dans une URL LinkedIn,
@@ -66,10 +72,20 @@ class QuickenrichBulkEnrichPeopleJobHandler implements JobHandlerInterface
 {
     public const TYPE = 'quickenrich_bulk_enrich_people';
 
-    private const BATCH_SIZE = 40;
+    private const BATCH_SIZE = 60;
 
     /** Codes HTTP QuickEnrich specifiques a UNE requete (donnee invalide) : n'arretent jamais tout le job. */
     private const PER_ITEM_ERROR_CODES = [400, 422];
+
+    /**
+     * 1000 requetes/minute par cle API (communique par l'utilisateur) =
+     * 60 secondes / 1000 = 60ms minimum entre deux appels pour ne jamais la
+     * depasser. 65ms plutot que 60 : marge volontaire (~923/minute au lieu
+     * de 1000 pile), pour absorber l'imprecision entre deux passages
+     * successifs (cf. processChunk(), le compteur ne persiste pas d'un appel
+     * a l'autre).
+     */
+    private const MIN_CALL_INTERVAL_SECONDS = 0.065;
 
     public function __construct(
         private QuickenrichClient $quickenrich,
@@ -84,9 +100,11 @@ class QuickenrichBulkEnrichPeopleJobHandler implements JobHandlerInterface
 
     public function allowsMultiplePassesPerTick(): bool
     {
-        // Appelle QuickEnrich (API externe) a chaque contact : rester a un
-        // lot par minute plutot que de risquer sa limite de debit.
-        return false;
+        // Exception justifiee, cf. docblock de classe : le debit QuickEnrich
+        // (1000/minute) est precisement connu et auto-applique en interne
+        // (MIN_CALL_INTERVAL_SECONDS), donc plusieurs passages enchaines
+        // dans un meme cron restent surs.
+        return true;
     }
 
     public function processChunk(WittyBackgroundJob $job): void
@@ -111,6 +129,12 @@ class QuickenrichBulkEnrichPeopleJobHandler implements JobHandlerInterface
         $leads          = $this->em->getRepository(Lead::class)->findBy(['id' => $leadIds]);
         $linkedinByLead = $this->fetchLinkedinUrls($leadIds);
 
+        // Ne persiste PAS d'un appel a processChunk() au suivant (variable
+        // locale) : chaque nouveau passage repart avec un premier appel non
+        // retarde. Effet de bord accepte (cf. MIN_CALL_INTERVAL_SECONDS) :
+        // la marge de securite (~923/min au lieu de 1000) l'absorbe.
+        $lastCallAt = null;
+
         foreach ($leads as $lead) {
             $rawLinkedinUrl = trim((string) ($linkedinByLead[$lead->getId()] ?? ''));
 
@@ -133,6 +157,8 @@ class QuickenrichBulkEnrichPeopleJobHandler implements JobHandlerInterface
                 'email' => $wantEmail ? '/employees/search' : null,
                 'phone' => $wantPhone ? '/employees/phone-search' : null,
             ]) as $target => $path) {
+                $this->throttle($lastCallAt);
+
                 try {
                     $response = $this->quickenrich->get($path, ['linkedin_url' => $linkedinUrl]);
                     $value    = trim((string) ($response['data'][$target] ?? ''));
@@ -172,6 +198,24 @@ class QuickenrichBulkEnrichPeopleJobHandler implements JobHandlerInterface
         if (count($leadIds) < self::BATCH_SIZE) {
             $job->setStatus(WittyBackgroundJob::STATUS_COMPLETED);
         }
+    }
+
+    /**
+     * Garantit au moins MIN_CALL_INTERVAL_SECONDS depuis le dernier appel
+     * QuickEnrich avant de rendre la main — jamais suppose respecte par la
+     * seule taille du lot, mesure et attendu explicitement a chaque appel.
+     */
+    private function throttle(?float &$lastCallAt): void
+    {
+        if (null !== $lastCallAt) {
+            $elapsed = microtime(true) - $lastCallAt;
+
+            if ($elapsed < self::MIN_CALL_INTERVAL_SECONDS) {
+                usleep((int) ((self::MIN_CALL_INTERVAL_SECONDS - $elapsed) * 1_000_000));
+            }
+        }
+
+        $lastCallAt = microtime(true);
     }
 
     /**

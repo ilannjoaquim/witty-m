@@ -19,8 +19,10 @@ use ReflectionProperty;
  * fournisseur reussi) mais que cet outil ne touche JAMAIS resumeCursor : il se
  * contente de repasser le job en QUEUED pour que le prochain tick le reprenne
  * de lui-meme. Egalement teste : le scope par utilisateur (meme regle que tous
- * les autres outils de job), le refus sur un statut autre que failed, et le
- * plafond de tentatives.
+ * les autres outils de job), le refus sur un statut autre que failed/cancelled
+ * (queued/running en particulier, deja gere tout seul), et le plafond de
+ * tentatives (partage entre les deux etats resumables, cf. CancelBulkJobToolTest
+ * pour le pendant "annuler").
  */
 class ResumeBulkJobToolTest extends TestCase
 {
@@ -66,6 +68,24 @@ class ResumeBulkJobToolTest extends TestCase
         $this->assertSame(['page' => 101, 'collected' => 10000], $job->getResumeCursor());
         $this->assertSame(1, $job->getResumeCount());
         $this->assertSame('HTTP 500', $output['last_error']);
+    }
+
+    public function testCancelledJobIsRequeuedWithoutTouchingResumeCursor(): void
+    {
+        $owner = $this->userWithId(1);
+        $job = (new WittyBackgroundJob())
+            ->setType('t')
+            ->setLabel('X')
+            ->setCreatedBy($owner)
+            ->setStatus(WittyBackgroundJob::STATUS_CANCELLED)
+            ->setResumeCursor(['page' => 50, 'collected' => 5000])
+            ->setSucceededItems(5000);
+
+        $output = $this->tool($job, $owner)->execute(['job_id' => 42]);
+
+        $this->assertSame('ok', $output['status']);
+        $this->assertSame(WittyBackgroundJob::STATUS_QUEUED, $job->getStatus());
+        $this->assertSame(['page' => 50, 'collected' => 5000], $job->getResumeCursor());
     }
 
     public function testResumeAttemptsAreCapped(): void

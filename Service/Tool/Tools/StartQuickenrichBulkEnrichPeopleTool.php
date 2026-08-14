@@ -129,9 +129,10 @@ class StartQuickenrichBulkEnrichPeopleTool extends AbstractTool
             'job_id'      => $job->getId(),
             'total_items' => $total,
             'message'     => sprintf(
-                'Job #%d lance en arriere-plan (%d contacts, ~40 par lot, un lot par passage de cron). '
-                .'Un contact sans LinkedIn sera ecarte (visible via list_bulk_job_items, status=skipped). '
-                .'Utilise check_bulk_job(job_id=%d) pour suivre la progression.',
+                'Job #%d lance en arriere-plan (%d contacts, plusieurs centaines par minute — debit auto-regule '
+                .'sur la limite QuickEnrich, pas un simple lot par minute). Un contact sans LinkedIn sera ecarte '
+                .'(visible via list_bulk_job_items, status=skipped). Utilise check_bulk_job(job_id=%d) pour suivre '
+                .'la progression.',
                 $job->getId(),
                 $total,
                 $job->getId(),

@@ -20,12 +20,46 @@ use PHPUnit\Framework\TestCase;
  */
 class QuickenrichBulkSearchJobHandlerTest extends TestCase
 {
-    public function testDoesNotAllowMultiplePassesPerTick(): void
+    public function testAllowsMultiplePassesPerTick(): void
     {
-        // Appelle QuickEnrich (API externe) : un seul passage par cron.
+        // Exception justifiee (cf. docblock de classe) au defaut "false" des
+        // autres handlers a fournisseur externe : le debit Contact Finder
+        // (120/minute) est precisement connu et auto-applique en interne
+        // (throttle), donc plusieurs passages enchaines restent surs.
         $handler = new QuickenrichBulkSearchJobHandler($this->createMock(QuickenrichClient::class), $this->createMock(EntityManagerInterface::class));
 
-        $this->assertFalse($handler->allowsMultiplePassesPerTick());
+        $this->assertTrue($handler->allowsMultiplePassesPerTick());
+    }
+
+    /**
+     * Contrairement a QuickenrichBulkEnrichPeopleJobHandler (plusieurs appels
+     * DANS un meme processChunk(), throttle par variable locale), celui-ci ne
+     * fait qu'UN appel par processChunk() : le throttle doit donc survivre
+     * d'un passage a l'autre via resumeCursor['last_call_at'] — c'est ce que
+     * ce test verifie specifiquement, en rejouant deux passages successifs
+     * sur le MEME job (comme le ferait le multi-passage reel).
+     */
+    public function testThrottlePersistsAcrossSuccessivePassesViaResumeCursor(): void
+    {
+        $client = $this->createMock(QuickenrichClient::class);
+        $client->method('post')->willReturn(['data' => array_fill(0, 100, [])]);
+
+        $em = $this->createMock(EntityManagerInterface::class);
+
+        $job = (new WittyBackgroundJob())->setParams(['body' => [], 'target_count' => 1000]);
+
+        $handler = new QuickenrichBulkSearchJobHandler($client, $em);
+
+        $start = microtime(true);
+        $handler->processChunk($job); // 1er passage : jamais retarde (rien a attendre).
+        $handler->processChunk($job); // 2e passage : doit attendre MIN_CALL_INTERVAL_SECONDS.
+        $elapsed = microtime(true) - $start;
+
+        // Marge sous les 550ms reels (limite Contact Finder), pour ne jamais
+        // etre fragile sur une machine lente, tout en detectant sans
+        // ambiguite une regression qui supprimerait le throttle.
+        $this->assertGreaterThan(0.3, $elapsed);
+        $this->assertArrayHasKey('last_call_at', $job->getResumeCursor());
     }
 
     public function testFullPageUnderTargetKeepsJobRunning(): void
