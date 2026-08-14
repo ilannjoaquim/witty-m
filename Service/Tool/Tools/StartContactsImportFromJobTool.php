@@ -10,6 +10,7 @@ use Mautic\LeadBundle\Model\ListModel;
 use MauticPlugin\WittyBundle\Entity\WittyBackgroundJob;
 use MauticPlugin\WittyBundle\Entity\WittyBackgroundJobItem;
 use MauticPlugin\WittyBundle\Entity\WittyBackgroundJobItemRepository;
+use MauticPlugin\WittyBundle\Service\Field\FieldWriteGuard;
 use MauticPlugin\WittyBundle\Service\Job\Handlers\ImportContactsFromJobHandler;
 use MauticPlugin\WittyBundle\Service\Tool\AbstractTool;
 use MauticPlugin\WittyBundle\Service\WittyConfig;
@@ -29,16 +30,26 @@ use MauticPlugin\WittyBundle\Service\WittyConfig;
  * `filters` est optionnel : une liste de regles combinees en ET (toutes
  * doivent passer), operateurs fixes plutot que du code libre — voir
  * Service/Job/JobItemFilter.php.
+ *
+ * Un job source FAILED reste exploitable : un plantage en cours de route
+ * (ex. QuickEnrich qui casse a 10 000/23 603) laisse quand meme les items deja
+ * enregistres en status=succeeded, valides individuellement. Un job source
+ * echoue est donc accepte au meme titre qu'un completed, tant qu'il a au
+ * moins un resultat exploitable — seul un job encore QUEUED/RUNNING est
+ * refuse (encore en train d'ecrire, rien de definitif a lire).
  */
 class StartContactsImportFromJobTool extends AbstractTool
 {
     private const FILTER_OPS = ['has_field', 'field_not_empty', 'field_empty', 'field_equals', 'field_not_equals', 'field_matches'];
+
+    private const IMPORTABLE_SOURCE_STATUSES = [WittyBackgroundJob::STATUS_COMPLETED, WittyBackgroundJob::STATUS_FAILED];
 
     public function __construct(
         private EntityManagerInterface $entityManager,
         private ListModel $listModel,
         private UserHelper $userHelper,
         private WittyConfig $config,
+        private FieldWriteGuard $fieldWriteGuard,
     ) {
     }
 
@@ -65,7 +76,9 @@ class StartContactsImportFromJobTool extends AbstractTool
             .'(notation pointee pour un champ imbrique). Appelle list_bulk_job_items(job_id=source_job_id, limit=1) '
             .'avant pour voir la forme exacte des donnees. filters (optionnel) : regles combinees en ET, operateurs '
             .'has_field/field_not_empty/field_empty/field_equals/field_not_equals/field_matches (regex) — pour '
-            .'ecarter les lignes sans interet (ex. QuickEnrich sans email ni telephone) avant creation.';
+            .'ecarter les lignes sans interet (ex. QuickEnrich sans email ni telephone) avant creation. Un job '
+            .'source failed reste utilisable (les resultats deja obtenus avant le plantage sont exploitables), '
+            .'seul un job encore en cours (queued/running) est refuse.';
     }
 
     public function getRequiredPermission(): ?string
@@ -81,7 +94,7 @@ class StartContactsImportFromJobTool extends AbstractTool
     public function getSchema(): array
     {
         return $this->schema([
-            'source_job_id' => ['type' => 'integer', 'description' => 'Job de recherche deja termine (status=completed) dont les resultats seront importes.'],
+            'source_job_id' => ['type' => 'integer', 'description' => 'Job de recherche deja termine (status=completed ou failed) dont les resultats seront importes.'],
             'mapping'       => ['type' => 'object', 'description' => 'alias_champ_contact -> chemin (notation pointee) dans les donnees du job source.'],
             'filters'       => [
                 'type'        => 'array',
@@ -111,6 +124,18 @@ class StartContactsImportFromJobTool extends AbstractTool
             return ['status' => 'error', 'error' => 'mapping est obligatoire et ne peut pas etre vide.'];
         }
 
+        $unknownAliases = $this->fieldWriteGuard->unknownAliases(array_keys($mapping), 'lead');
+
+        if ([] !== $unknownAliases) {
+            return [
+                'status' => 'error',
+                'error'  => sprintf(
+                    "Alias de champ inconnu dans mapping : %s. Verifie l orthographe avec l outil list_fields (object: 'contact') avant de reessayer.",
+                    implode(', ', $unknownAliases),
+                ),
+            ];
+        }
+
         foreach ($filters as $filter) {
             $op = (string) (is_array($filter) ? ($filter['op'] ?? '') : '');
 
@@ -130,16 +155,22 @@ class StartContactsImportFromJobTool extends AbstractTool
             return ['status' => 'error', 'error' => sprintf('Job source #%d introuvable.', $sourceJobId)];
         }
 
-        if (WittyBackgroundJob::STATUS_COMPLETED !== $sourceJob->getStatus()) {
-            return ['status' => 'error', 'error' => sprintf('Job source #%d n est pas termine (status=%s) : attends qu il passe a completed.', $sourceJobId, $sourceJob->getStatus())];
+        $sourceStatus = $sourceJob->getStatus();
+
+        if (!in_array($sourceStatus, self::IMPORTABLE_SOURCE_STATUSES, true)) {
+            return ['status' => 'error', 'error' => sprintf('Job source #%d n est pas termine (status=%s) : attends qu il passe a completed (ou failed, un echec en cours de route reste exploitable pour les resultats deja obtenus).', $sourceJobId, $sourceStatus)];
         }
 
         /** @var WittyBackgroundJobItemRepository $itemRepository */
         $itemRepository = $this->entityManager->getRepository(WittyBackgroundJobItem::class);
-        $available      = $itemRepository->countForJob($sourceJobId, WittyBackgroundJobItem::STATUS_SUCCEEDED);
+        // onlyUnconsumed=true : si ce job source a deja fait l objet d un
+        // import precedent (courant apres un resume_bulk_job qui l a fait
+        // grossir entre-temps), ne recompte que ce qui n a pas encore ete
+        // transmis a Mautic — jamais les elements deja importes.
+        $available = $itemRepository->countForJob($sourceJobId, WittyBackgroundJobItem::STATUS_SUCCEEDED, true);
 
         if (0 === $available) {
-            return ['status' => 'error', 'error' => sprintf('Job source #%d n a aucun resultat exploitable (status=succeeded).', $sourceJobId)];
+            return ['status' => 'error', 'error' => sprintf('Job source #%d n a aucun resultat exploitable non deja importe (status=succeeded, pas encore consomme).', $sourceJobId)];
         }
 
         $segmentId = (int) ($arguments['segment_id'] ?? 0);
@@ -153,6 +184,8 @@ class StartContactsImportFromJobTool extends AbstractTool
             }
         }
 
+        $partial = WittyBackgroundJob::STATUS_FAILED === $sourceStatus;
+
         if ($this->config->requiresConfirmation() && true !== ($arguments['confirmed'] ?? false)) {
             return $this->confirmationRequired(array_filter([
                 'type'          => 'contacts_import_from_job',
@@ -161,13 +194,23 @@ class StartContactsImportFromJobTool extends AbstractTool
                 'mapping'       => $mapping,
                 'filters'       => [] !== $filters ? $filters : null,
                 'segment'       => $segment?->getName(),
+                // Signale explicitement un import PARTIEL (job source echoue
+                // en cours de route) : l'utilisateur doit le savoir avant de
+                // valider, ce n'est pas la totalite de ce qui etait vise.
+                'partial'       => $partial ? true : null,
+                'source_status' => $partial ? $sourceStatus : null,
             ], static fn ($value): bool => null !== $value));
         }
 
         $job = (new WittyBackgroundJob())
             ->setType(ImportContactsFromJobHandler::TYPE)
             ->setCreatedBy($user)
-            ->setLabel(sprintf('Import contacts depuis job #%d (%d resultats)', $sourceJobId, $available))
+            ->setLabel(sprintf(
+                '%s contacts depuis job #%d (%d resultats)',
+                $partial ? 'Import partiel' : 'Import',
+                $sourceJobId,
+                $available,
+            ))
             ->setParams(array_filter([
                 'source_job_id' => $sourceJobId,
                 'mapping'       => $mapping,
@@ -181,11 +224,13 @@ class StartContactsImportFromJobTool extends AbstractTool
 
         return $this->ok([
             'job_id'  => $job->getId(),
+            'partial' => $partial,
             'message' => sprintf(
-                'Job #%d lance en arriere-plan (%d resultats a convertir, ~50 par lot). '
+                'Job #%d lance en arriere-plan (%d resultats%s a convertir, ~50 par lot). '
                 .'Utilise check_bulk_job(job_id=%d) pour suivre la progression.',
                 $job->getId(),
                 $available,
+                $partial ? ' — import PARTIEL, le job source a echoue avant sa cible' : '',
                 $job->getId(),
             ),
         ]);

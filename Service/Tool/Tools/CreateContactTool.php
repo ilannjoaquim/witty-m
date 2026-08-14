@@ -6,6 +6,7 @@ namespace MauticPlugin\WittyBundle\Service\Tool\Tools;
 
 use Mautic\LeadBundle\Entity\Lead;
 use Mautic\LeadBundle\Model\LeadModel;
+use MauticPlugin\WittyBundle\Service\Field\FieldWriteGuard;
 use MauticPlugin\WittyBundle\Service\Tool\AbstractTool;
 use MauticPlugin\WittyBundle\Service\WittyConfig;
 
@@ -19,6 +20,7 @@ class CreateContactTool extends AbstractTool
     public function __construct(
         private LeadModel $leadModel,
         private WittyConfig $config,
+        private FieldWriteGuard $fieldWriteGuard,
     ) {
     }
 
@@ -82,6 +84,20 @@ class CreateContactTool extends AbstractTool
             static fn (string $key): bool => 'email' !== $key,
             ARRAY_FILTER_USE_KEY,
         );
+
+        $prepared = $this->fieldWriteGuard->prepare($fields, 'lead');
+
+        if ([] !== $prepared['unknown']) {
+            return [
+                'status' => 'error',
+                'error'  => sprintf(
+                    "Alias de champ inconnu : %s. Verifie l orthographe avec l outil list_fields (object: 'contact') avant de reessayer.",
+                    implode(', ', $prepared['unknown']),
+                ),
+            ];
+        }
+
+        $fields = $prepared['fields'];
 
         if ($this->config->requiresConfirmation() && true !== ($arguments['confirmed'] ?? false)) {
             return $this->confirmationRequired([

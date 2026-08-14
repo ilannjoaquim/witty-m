@@ -16,9 +16,15 @@ class WittyBackgroundJobItemRepository extends CommonRepository
      * 50 000 elements, l'agent doit pouvoir en revoir un lot borne a la fois
      * plutot que de tout recevoir d'un coup (budget de contexte du modele).
      *
+     * $onlyUnconsumed : utilise par ImportContactsFromJobHandler/
+     * ImportCompaniesFromJobHandler (jamais par list_bulk_job_items, qui doit
+     * pouvoir montrer TOUT l'historique) pour ne relire que ce qu'un import
+     * precedent du meme job source n'a pas deja transmis a Mautic — cf.
+     * WittyBackgroundJobItem::$consumedAt.
+     *
      * @return WittyBackgroundJobItem[]
      */
-    public function findForJob(int $jobId, ?string $status, int $limit, int $offset): array
+    public function findForJob(int $jobId, ?string $status, int $limit, int $offset, bool $onlyUnconsumed = false): array
     {
         $qb = $this->createQueryBuilder('i')
             ->where('IDENTITY(i.job) = :jobId')
@@ -31,10 +37,14 @@ class WittyBackgroundJobItemRepository extends CommonRepository
             $qb->andWhere('i.status = :status')->setParameter('status', $status);
         }
 
+        if ($onlyUnconsumed) {
+            $qb->andWhere('i.consumedAt IS NULL');
+        }
+
         return $qb->getQuery()->getResult();
     }
 
-    public function countForJob(int $jobId, ?string $status = null): int
+    public function countForJob(int $jobId, ?string $status = null, bool $onlyUnconsumed = false): int
     {
         $qb = $this->createQueryBuilder('i')
             ->select('COUNT(i.id)')
@@ -43,6 +53,10 @@ class WittyBackgroundJobItemRepository extends CommonRepository
 
         if (null !== $status) {
             $qb->andWhere('i.status = :status')->setParameter('status', $status);
+        }
+
+        if ($onlyUnconsumed) {
+            $qb->andWhere('i.consumedAt IS NULL');
         }
 
         return (int) $qb->getQuery()->getSingleScalarResult();

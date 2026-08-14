@@ -33,6 +33,23 @@ use Symfony\Component\Console\Output\OutputInterface;
  * handler par construction, cf. JobHandlerInterface), jamais de corruption —
  * le meme choix que le reste du plugin (cf. les autres Command/, aucune
  * n'utilise de verrou).
+ *
+ * Un job normalement ne recoit qu'UN SEUL lot par passage de cron (un appel
+ * processChunk()). Exception : un handler dont allowsMultiplePassesPerTick()
+ * renvoie true (aucun appel a une API externe a debit limite — aujourd'hui
+ * uniquement les deux handlers d'import, purs ecrits Mautic) peut enchainer
+ * plusieurs lots sur le MEME job tant qu'il reste du budget de temps sur ce
+ * passage, au lieu d'un seul. Question posee en session : "50 imports/minute
+ * c'est trop peu, pourquoi ?" — reponse : ce n'est pas une limite arbitraire,
+ * chaque lot passe par LeadModel::saveEntity() (campagnes/segments/points/
+ * recherche, cout hors de notre controle), donc un lot plus gros risquerait
+ * de depasser MAX_RUNTIME_SECONDS sans aucun moyen de l'interrompre en cours
+ * de route. Mautic lui-meme (LeadBundle\Model\ImportModel::process(), import
+ * CSV) n'a AUCUNE coupure de temps — il tourne jusqu'a la fin du fichier en
+ * un seul appel CLI, ce qui marche parce que mautic:import est dedie a UN
+ * import a la fois, jamais partage avec d'autres types de taches. Le
+ * multi-passage reprend ce meme principe (avancer tant qu'il y a du travail)
+ * mais borne au budget commun du cron partage par tous les types de job.
  */
 #[AsCommand(name: 'witty:jobs:process', description: 'Fait avancer les jobs de fond (enrichissement/recherche a volume) en attente.')]
 class ProcessBackgroundJobsCommand extends Command
@@ -41,18 +58,25 @@ class ProcessBackgroundJobsCommand extends Command
 
     private const MAX_JOBS_PER_RUN = 200;
 
+    /** Filet de securite : borne deja par le budget de temps, mais evite une boucle degenree qui ne progresserait pas. */
+    private const MAX_PASSES_PER_JOB = 500;
+
     public function __construct(
         private JobHandlerRegistry $handlers,
         private WittyBackgroundJobRepository $repository,
         private EntityManagerInterface $em,
         private LoggerInterface $logger,
+        // Overridable UNIQUEMENT pour les tests (verifier l'effet d'un budget
+        // de temps epuise en cours de run sans attendre 50 secondes reelles) :
+        // jamais fourni en production, ou la constante fait foi.
+        private ?float $maxRuntimeSeconds = null,
     ) {
         parent::__construct();
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $deadline = microtime(true) + self::MAX_RUNTIME_SECONDS;
+        $deadline = microtime(true) + ($this->maxRuntimeSeconds ?? self::MAX_RUNTIME_SECONDS);
         $jobs     = $this->repository->findRunnable(self::MAX_JOBS_PER_RUN);
 
         if ([] === $jobs) {
@@ -69,11 +93,27 @@ class ProcessBackgroundJobsCommand extends Command
                 break;
             }
 
-            $this->tick($job, $output);
-            ++$ticked;
+            $multiPass = true === $this->handlers->get($job->getType())?->allowsMultiplePassesPerTick();
+            $passes    = 0;
+
+            do {
+                $this->tick($job, $output);
+                ++$ticked;
+                ++$passes;
+            } while (
+                $multiPass
+                && $passes < self::MAX_PASSES_PER_JOB
+                && microtime(true) < $deadline
+                && $this->isStillActive($job)
+            );
         }
 
         return Command::SUCCESS;
+    }
+
+    private function isStillActive(WittyBackgroundJob $job): bool
+    {
+        return in_array($job->getStatus(), [WittyBackgroundJob::STATUS_QUEUED, WittyBackgroundJob::STATUS_RUNNING], true);
     }
 
     private function tick(WittyBackgroundJob $job, OutputInterface $output): void

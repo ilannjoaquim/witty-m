@@ -171,6 +171,41 @@ plugNmeet, seulement une URL Mautic stable qui le génère à la volée à chaqu
   est appliqué partout où ce schéma apparaît (`MeetJoinController`,
   `ReconcileMeetAttendanceCommand`).
 
+#### Troisième type de lien : partageable, sans contact connu à l'avance
+
+Les deux mécanismes ci-dessus supposent un contact identifié *avant* de générer le lien :
+l'invitation signée (un Lead précis) ou `roomsLinkAction` (l'admin tape le nom au moment de générer
+le lien, jeton plugNmeet réel miné immédiatement, usage unique). Aucun des deux ne convient pour «
+un lien à coller dans un canal public/à partager librement, que plusieurs personnes ouvriront chacune
+en choisissant leur propre nom ». D'où un troisième bouton dans la modale **Liens** de la section
+Rooms, **Lien partageable**.
+
+- **`InvitationLinkSigner::sign()`/`verify()`** — `lead_id` est devenu **nullable**. Un lien
+  partageable réutilise exactement le même mécanisme que l'invitation par campagne
+  (`/meet/join/{token}`, JWT-maison longue durée, jeton plugNmeet réel jamais pré-généré), avec
+  `lead_id=null` dans la charge utile — c'est ce que `joinAction()` lit pour savoir s'il doit
+  résoudre un Lead automatiquement ou demander un nom.
+- **`VideoconferenceController::roomsShareableLinkAction`** (`POST /witty/video/rooms/shareable-link`)
+  — ne prend que `room_id` (pas de `name`, contrairement à `roomsLinkAction` : c'est le visiteur qui
+  le fournira). Renvoie l'URL `/meet/join/{token}` telle quelle, jamais un jeton plugNmeet direct.
+- **`MeetJoinController::joinAction()`** — si `lead_id` est `null`, affiche un petit formulaire HTML
+  autonome ("Votre nom" + bouton Rejoindre) au lieu de résoudre un Lead, qui poste vers…
+- **`MeetJoinController::joinAnonymousAction()`** (`POST /meet/join/{token}/enter`) — revérifie le
+  token de zéro (jamais de confiance dans une valeur non re-vérifiée à travers une requête), rejette
+  explicitement tout token dont `lead_id` ne serait *pas* `null` (défense en profondeur : l'UI ne
+  propose jamais ce cas, mais ce chemin ne doit jamais devenir une porte dérobée pour rejoindre sous
+  l'identité d'un Lead sans passer par la vérification normale), mint le vrai jeton plugNmeet avec le
+  nom saisi (tronqué à 80 caractères) et `user_id = "guest-{hash}"`.
+- **Compromis assumé, décidé avec l'utilisateur avant l'implémentation** : contrairement au préfixe
+  `lead-{id}` du flux normal, `guest-{hash}` n'a **aucun** Lead à rattacher —
+  `ReconcileMeetAttendanceCommand` ne le retrouvera jamais dans l'artefact `MEETING_ANALYTICS`, donc
+  **aucun suivi de présence individuel** pour ce type de lien. Un lien partageable troque le suivi
+  contre la souplesse (non-unique, pas de saisie préalable côté admin) ; pour un suivi précis,
+  l'invitation personnalisée reste le bon outil.
+- Aucune entité `WittyMeetInvitation` n'est créée pour ce type de lien (même choix que
+  `roomsLinkAction`, qui n'en crée pas non plus) : il n'y a pas de contact à rattacher à une ligne
+  de suivi.
+
 ### Recherche et navigation web (Bright Data, MCP)
 
 Une clé API Bright Data (**Details**) donne à l'agent l'accès au [serveur MCP distant de Bright
@@ -491,6 +526,23 @@ une classe taguée = une capacité de plus, rien à câbler ailleurs.
   attente, une exécution reste courte et prévisible, jamais de quoi chevaucher le passage suivant.
   Aucun verrou explicite (comme les autres `Command/` de ce plugin) : un chevauchement re-traiterait
   au pire un lot déjà fait, jamais de corruption.
+- **Multi-passage pour les imports (`JobHandlerInterface::allowsMultiplePassesPerTick()`)** — question
+  posée en session : 50 imports/minute (un lot par passage de cron, taille fixe), c'est trop peu,
+  pourquoi ? Réponse trouvée en comparant avec `mautic:import` (import CSV natif) :
+  `LeadBundle\Model\ImportModel::process()` n'a **aucune** coupure de temps, il tourne jusqu'à la fin
+  du fichier en un seul appel CLI — ce qui marche parce que cette commande est dédiée à UN import à
+  la fois, jamais partagée avec d'autres types de tâches comme l'est `witty:jobs:process`. Augmenter
+  bêtement `BATCH_SIZE` (50 → 1000) aurait risqué de dépasser les 50 s du budget commun sans aucun
+  filet, puisque le budget n'est vérifié **qu'entre deux jobs**, jamais interrompu en cours de lot.
+  Solution retenue, plus proche de l'esprit de Mautic mais bornée : un handler dont
+  `allowsMultiplePassesPerTick()` renvoie `true` peut être rappelé plusieurs fois sur le **même** job
+  au sein d'un seul passage de cron (au lieu d'un seul lot), tant qu'il reste du budget de temps —
+  `ProcessBackgroundJobsCommand::execute()` boucle sur `tick()` jusqu'à ce que le job devienne
+  terminal, que `MAX_PASSES_PER_JOB` (500, filet de sécurité) soit atteint, ou que le budget expire.
+  Réservé aux deux handlers d'import (`ImportContactsFromJobHandler`/`ImportCompaniesFromJobHandler`,
+  aucun appel API externe, uniquement des écritures Mautic) : les quatre autres handlers (Apollo/
+  QuickEnrich/MCP) renvoient `false` et restent à un lot par minute, pour ne jamais risquer la limite
+  de débit d'un fournisseur externe en les appelant en rafale dans un même passage.
 - **`start_apollo_bulk_enrich_people`/`start_quickenrich_bulk_search`/`start_bulk_mcp_search`** — un
   outil de déclenchement par intégration (schéma typé, propre à chacune) plutôt qu'un unique outil
   générique à paramètres libres : plus fiable pour un modèle de tool-calling qu'un `params: object`
@@ -498,6 +550,54 @@ une classe taguée = une capacité de plus, rien à câbler ailleurs.
 - **`check_bulk_job`/`list_bulk_job_items`** — génériques, partagés par les trois intégrations
   (même principe que `check_waterfall_enrichment`). Scope par utilisateur créateur (comme
   `WittyAttachment`) : un `job_id` d'un autre compte est traité comme introuvable.
+- **Reprise sur erreur (`resume_bulk_job`)** — question posée en session : une erreur 500/timeout
+  fournisseur en cours de pagination (constaté avec QuickEnrich, ex. plantage à 10 000/23 603)
+  arrête-t-elle tout, faut-il tout relancer depuis zéro ? Réponse trouvée en relisant les quatre
+  handlers : non, **`resumeCursor` n'avance déjà qu'après un appel fournisseur réussi** (choix fait
+  dès la conception initiale du système, cf. leurs docblocks individuelles) — un job `failed` pointe
+  donc toujours sur la dernière position confirmée, jamais sur une position perdue. Le seul obstacle
+  réel était que `ProcessBackgroundJobsCommand::findRunnable()` n'interroge que
+  `queued`/`running` : un job `failed` n'était donc plus jamais repris par le cron, quel que soit
+  l'état de son curseur. `Service/Tool/Tools/ResumeBulkJobTool.php` (`resume_bulk_job`) ne fait donc
+  qu'une chose, volontairement minimale — repasser le job en `queued` sans toucher à
+  `resumeCursor`/aux items déjà enregistrés — le prochain passage de cron reprend alors de lui-même,
+  via le même code que n'importe quel tick normal (**zéro changement nécessaire dans les quatre
+  handlers**). Plafonné à `ResumeBulkJobTool::MAX_RESUME_ATTEMPTS` (5) via une nouvelle colonne
+  `resume_count` (`Migrations/Version_3_1_0.php`) : au-delà, l'outil refuse et renvoie le dernier
+  message d'erreur plutôt que de laisser l'agent boucler indéfiniment contre un fournisseur en panne
+  prolongée. `check_bulk_job` expose `resume_count` (omis si jamais relancé) pour que l'agent voie
+  l'historique. `PromptBuilder` établit l'ordre de préférence : `resume_bulk_job` d'abord (reprend LE
+  job, rien à réimporter séparément) ; seulement si le plafond est atteint ou le problème manifestement
+  durable, repli sur l'import partiel déjà documenté ci-dessus (`partial: true`) puis une nouvelle
+  recherche pour le reliquat réel.
+- **Importer maintenant PUIS reprendre plus tard : question posée en session, et un vrai risque de
+  doublon existait pour y répondre "oui" sans réserve.** Scénario : les 10 000 premiers résultats
+  sont importés (`start_contacts_import_from_job`, sans email à dédupliquer — décision explicite de
+  ne pas enrichir les emails à ce stade), puis `resume_bulk_job` fait grossir le job source de
+  13 600 résultats de plus. Si un second `start_contacts_import_from_job` relisait tout depuis le
+  début (comportement d'origine : offset 0 à chaque nouvel appel), les 10 000 premiers — sans email,
+  donc jamais dédupliqués par `ContactImporter::importOne()` — seraient **recréés en double**. Une
+  mise à jour par id (`updateById()`, cas enrichissement) n'aurait pas ce problème (idempotente), mais
+  aurait quand même retraité inutilement des milliers d'éléments déjà appliqués à chaque nouvel appel.
+  Corrigé par un marquage au niveau de l'élément plutôt qu'un simple curseur numérique (qui ne sait
+  pas distinguer "déjà lu par CET import" de "déjà transmis à Mautic par un import antérieur") :
+  - **`WittyBackgroundJobItem::$consumedAt`** (nullable, `Migrations/Version_3_2_0.php`) — posé
+    UNIQUEMENT au moment où l'élément est réellement transmis à `ContactImporter`/`CompanyImporter`
+    (pas pour un élément écarté par un filtre ou sans champ mappable : un futur import avec un
+    mapping/des filtres différents doit encore pouvoir le reconsidérer — la portée du marquage est
+    volontairement étroite, à l'endroit exact où le risque de doublon existe, pas plus large).
+  - **`WittyBackgroundJobItemRepository::findForJob()`/`countForJob()`** — nouveau paramètre
+    `$onlyUnconsumed` (défaut `false`, donc **jamais** activé pour `list_bulk_job_items`, qui doit
+    montrer tout l'historique). `ImportContactsFromJobHandler`/`ImportCompaniesFromJobHandler`
+    l'utilisent systématiquement à `true` et abandonnent leur `resumeCursor` par offset : "pas encore
+    consommé" **est** le curseur de reprise, un offset numérique n'aurait plus de sens dès qu'un
+    job source peut grossir entre deux imports.
+  - **`Start*ImportFromJobTool`** — le calcul d'`available` (et donc le refus "aucun résultat
+    exploitable") ne compte plus que les éléments non consommés : un second appel sur un job déjà
+    entièrement importé est proprement refusé plutôt que de créer un job qui ne ferait rien.
+  - Résultat : importer une partie, reprendre le job source, puis réimporter est un flux
+    **explicitement supporté et sûr**, y compris répété plusieurs fois — chaque import ne récupère
+    jamais que le surplus obtenu depuis le précédent.
 - **Aucune écriture automatique sur un contact Mautic** — un résultat de job est une donnée en
   ATTENTE de revue (`list_bulk_job_items`), jamais appliquée d'elle-même : c'est l'agent qui, sur
   demande, appelle `update_contact`/`bulk_create_contacts` pour l'enregistrer, avec le flux de
@@ -552,6 +652,17 @@ vérifié, jamais par du code que l'agent fournit :
   le premier passage de cron.
 - **`list_bulk_job_items` reste l'outil de découverte** — l'agent l'appelle d'abord sur le job source
   (`limit=1`) pour voir la forme exacte des données avant d'écrire un mapping, jamais deviné.
+- **Un job source `failed` reste exploitable** — bug d'usage réel rencontré en session : une
+  recherche QuickEnrich visant 23 603 résultats a planté à 10 000 (erreur fournisseur en cours de
+  pagination), passant le job en `status=failed`. Les deux outils exigeaient jusque-là
+  `status=completed` strictement, rejetant un job qui contenait pourtant 10 000 résultats
+  parfaitement exploitables (`status=succeeded` au niveau des items, indépendant du statut final du
+  job parent) — obligeant à tout relancer depuis la page 1 pour rien. Corrigé :
+  `StartContactsImportFromJobTool`/`StartCompaniesImportFromJobTool` acceptent désormais `completed`
+  **et** `failed` (seul un job encore `queued`/`running` reste refusé, lui encore en train d'écrire).
+  La réponse et l'aperçu de confirmation portent alors `partial: true` — l'agent est instruit
+  (`PromptBuilder`) de le signaler explicitement à l'utilisateur plutôt que de laisser croire à un
+  import complet.
 
 **Deux modes de rapprochement, choisis AUTOMATIQUEMENT selon le type du job source** (jamais laissé
 à l'appréciation de l'agent, pour éviter l'erreur) — `ImportContactsFromJobHandler::CONTACT_ID_MATCHED_SOURCE_TYPES` :
@@ -587,6 +698,49 @@ destination du pipeline entreprises sont donc structurellement différentes de c
   externe → nouvelle entreprise" ici, seulement "entreprise déjà connue → enrichissement". Mêmes
   `mapping`/`filters` déclaratifs, même `isWriteOperation()=true` avec confirmation standard, que la
   version contacts.
+
+#### Garde-fou sur les alias de champ (`FieldWriteGuard`, `list_fields`)
+
+**Bug constaté en production** : après un import de contacts QuickEnrich via `bulk_create_contacts`,
+l'agent a affirmé avoir renseigné le lien LinkedIn — en réalité absent de la fiche. Cause trouvée par
+lecture directe du code, confirmée contre une vraie base MySQL locale : `LeadModel::setFieldValues()`
+(coeur Mautic) ignore silencieusement toute clé qui ne correspond à aucun alias de champ publié,
+**sans la moindre erreur**. Or la description même de `bulk_create_contacts` citait `linkedin_url`
+comme exemple d'alias Mautic — c'est le nom du paramètre d'entrée des outils d'enrichissement
+(Apollo/QuickEnrich/Prospeo), pas un alias Mautic (qui est `linkedin`) : l'agent suivait fidèlement un
+exemple erroné dans le prompt de l'outil lui-même. Corrigé dans la description, mais un alias mal
+deviné peut se reproduire n'importe quand, pour n'importe quel champ — un correctif de prompt seul
+n'aurait garanti sa non-répétition qu'en théorie.
+
+**`Service/Field/FieldWriteGuard.php`**, appelé juste avant chaque `setFieldValues()` du plugin
+(`create_contact`, `update_contact`, `bulk_create_contacts`, `create_company`, `update_company`,
+`import_leads_from_file`, et les mappings de `start_contacts_import_from_job`/
+`start_companies_import_from_job`, validés au lancement du job **et** ré-appliqués à l'écriture de
+chaque lot en tâche de fond) :
+
+- **Alias inconnu → erreur explicite**, plus jamais une perte silencieuse. Message renvoyé à l'agent :
+  liste des alias en cause + rappel d'appeler `list_fields`.
+- **Code pays ISO → nom complet anglais, automatiquement.** Deuxième bug trouvé en creusant le même
+  rapport utilisateur (le champ `country` du contact était vide lui aussi) : `country` est un
+  `<select>` Mautic dont les choix sont les noms complets anglais de
+  `CoreBundle/Assets/json/countries.json` (`"France"`, `"United States"`...), mais QuickEnrich
+  raisonne en codes ISO (`country_code`, ex. `"FR"`). La valeur s'enregistre sans erreur (colonne
+  `varchar` libre, aucune validation de choix hors formulaire web — vérifié dans
+  `RequestTrait::cleanFields()`, aucun cas `country` dans son switch) mais n'apparaît plus dans la
+  fiche, le select ne pouvant présélectionner une valeur absente de ses choix. `FieldWriteGuard`
+  convertit un code à 2 lettres reconnu (`Symfony\Component\Intl\Countries::getName($code, 'en')`,
+  déjà vendorisé par Mautic — vérifié : `FR → France`, `US → United States`, `GB → United Kingdom`,
+  correspond exactement à la liste Mautic) avant écriture, pour `country` **et** `companycountry`.
+- **`prepareMany()`** — même chose pour un lot (`bulk_create_contacts`, `import_leads_from_file`) :
+  les définitions de champ sont récupérées une seule fois pour tout le lot, pas une fois par ligne.
+
+**`list_fields`** (`Service/Tool/Tools/ListFieldsTool.php`) — outil de découverte complémentaire,
+demandé explicitement par l'utilisateur plutôt que de se reposer sur le seul rejet réactif : liste les
+alias réels d'un contact ou d'une entreprise (`object: contact|company`), avec label/type, et les
+valeurs acceptées pour un champ `select`/`multiselect` (ex. `companyindustry`, ~40 secteurs fixes —
+un autre champ où une valeur hors liste serait tout aussi silencieusement perdue à l'affichage).
+`PromptBuilder` instruit l'agent de l'appeler avant d'écrire un alias incertain, plutôt que de deviner
+par analogie avec le nom du champ chez le fournisseur de données.
 
 ### Pièces jointes (docs, tableurs, images, polices)
 
@@ -857,6 +1011,7 @@ outils.
 | `update_form` | ● | Ajoute/modifie/supprime des champs et des actions d'un formulaire déjà créé, un par un (op=add\|update\|remove) |
 | `create_segment` | ● | Segment + filtres |
 | `search_contacts` | | Recherche de contacts |
+| `list_fields` | | Alias, label, type et valeurs acceptées des champs contact/entreprise réellement définis dans Mautic |
 | `create_contact` | ● | Contact (refuse le doublon d'email) |
 | `update_contact` | ● | Champs d'un contact existant, id ou email |
 | `manage_contact_segments` | ● | Ajoute/retire un contact d'un ou plusieurs segments |
@@ -876,6 +1031,7 @@ outils.
 | `start_quickenrich_bulk_search` | | Lance en arrière-plan une recherche QuickEnrich paginée jusqu'à `target_count` résultats |
 | `start_bulk_mcp_search` | | Lance en arrière-plan la pagination d'un outil MCP (Prospeo, data.gouv.fr) |
 | `check_bulk_job` | | Consulte la progression d'un job de fond |
+| `resume_bulk_job` | | Relance un job de fond `failed` exactement où il s'est arrêté (curseur intact), plafonné à 5 tentatives |
 | `list_bulk_job_items` | | Récupère une page de résultats d'un job de fond, à revoir avant application |
 | `start_contacts_import_from_job` | ● | Convertit/enrichit en arrière-plan les résultats d'un job terminé en contacts Mautic (mapping/filtres déclaratifs, met à jour par id si le job source est un enrichissement) |
 | `start_companies_import_from_job` | ● | Applique en arrière-plan les résultats d'un job d'enrichissement d'entreprises terminé sur les entreprises Mautic correspondantes (toujours une mise à jour, jamais une création) |

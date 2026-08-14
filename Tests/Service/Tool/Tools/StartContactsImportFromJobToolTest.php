@@ -12,6 +12,7 @@ use MauticPlugin\WittyBundle\Entity\WittyBackgroundJob;
 use MauticPlugin\WittyBundle\Entity\WittyBackgroundJobItem;
 use MauticPlugin\WittyBundle\Entity\WittyBackgroundJobItemRepository;
 use MauticPlugin\WittyBundle\Entity\WittyBackgroundJobRepository;
+use MauticPlugin\WittyBundle\Service\Field\FieldWriteGuard;
 use MauticPlugin\WittyBundle\Service\Tool\Tools\StartContactsImportFromJobTool;
 use MauticPlugin\WittyBundle\Service\WittyConfig;
 use PHPUnit\Framework\TestCase;
@@ -37,6 +38,20 @@ class StartContactsImportFromJobToolTest extends TestCase
     public function testEmptyMappingIsRejected(): void
     {
         $output = $this->tool()->execute(['source_job_id' => 1, 'mapping' => []]);
+
+        $this->assertSame('error', $output['status']);
+    }
+
+    public function testUnknownFieldAliasInMappingIsRejected(): void
+    {
+        $em = $this->createMock(EntityManagerInterface::class);
+        $em->expects($this->never())->method('persist');
+
+        $guard = $this->createMock(FieldWriteGuard::class);
+        $guard->method('unknownAliases')->willReturn(['linkedin_url']);
+
+        $tool = new StartContactsImportFromJobTool($em, $this->createMock(ListModel::class), $this->userHelper($this->userWithId(1)), $this->createMock(WittyConfig::class), $guard);
+        $output = $tool->execute(['source_job_id' => 1, 'mapping' => ['linkedin_url' => 'linkedin_url']]);
 
         $this->assertSame('error', $output['status']);
     }
@@ -88,6 +103,33 @@ class StartContactsImportFromJobToolTest extends TestCase
         $this->assertSame('error', $output['status']);
     }
 
+    public function testFailedSourceJobWithSucceededItemsIsAcceptedAsAPartialImport(): void
+    {
+        $owner = $this->userWithId(1);
+        $sourceJob = (new WittyBackgroundJob())->setType('x')->setLabel('L')->setCreatedBy($owner)->setStatus(WittyBackgroundJob::STATUS_FAILED);
+
+        $em = $this->emStub($sourceJob, 10000);
+        $listModel = $this->createMock(ListModel::class);
+        $config = $this->createMock(WittyConfig::class);
+        $config->method('requiresConfirmation')->willReturn(false);
+
+        $tool = new StartContactsImportFromJobTool($em, $listModel, $this->userHelper($owner), $config, $this->guard());
+        $output = $tool->execute(['source_job_id' => 1, 'mapping' => ['email' => 'email']]);
+
+        $this->assertSame('ok', $output['status']);
+        $this->assertTrue($output['partial']);
+    }
+
+    public function testFailedSourceJobWithNoSucceededItemsIsStillRejected(): void
+    {
+        $owner = $this->userWithId(1);
+        $job = (new WittyBackgroundJob())->setType('x')->setLabel('L')->setCreatedBy($owner)->setStatus(WittyBackgroundJob::STATUS_FAILED);
+
+        $output = $this->tool($job, 0, $owner)->execute(['source_job_id' => 1, 'mapping' => ['email' => 'email']]);
+
+        $this->assertSame('error', $output['status']);
+    }
+
     public function testValidRequestCreatesAJobOfTheRightTypeWhenConfirmationNotRequired(): void
     {
         $owner = $this->userWithId(1);
@@ -98,7 +140,7 @@ class StartContactsImportFromJobToolTest extends TestCase
         $config = $this->createMock(WittyConfig::class);
         $config->method('requiresConfirmation')->willReturn(false);
 
-        $tool = new StartContactsImportFromJobTool($em, $listModel, $this->userHelper($owner), $config);
+        $tool = new StartContactsImportFromJobTool($em, $listModel, $this->userHelper($owner), $config, $this->guard());
         $output = $tool->execute(['source_job_id' => 1, 'mapping' => ['email' => 'email', 'firstname' => 'first_name']]);
 
         $this->assertSame('ok', $output['status']);
@@ -114,7 +156,7 @@ class StartContactsImportFromJobToolTest extends TestCase
         $config = $this->createMock(WittyConfig::class);
         $config->method('requiresConfirmation')->willReturn(true);
 
-        $tool = new StartContactsImportFromJobTool($em, $listModel, $this->userHelper($owner), $config);
+        $tool = new StartContactsImportFromJobTool($em, $listModel, $this->userHelper($owner), $config, $this->guard());
 
         $output = $tool->execute(['source_job_id' => 1, 'mapping' => ['email' => 'email']]);
         $this->assertSame('confirmation_required', $output['status']);
@@ -131,7 +173,7 @@ class StartContactsImportFromJobToolTest extends TestCase
         $config = $this->createMock(WittyConfig::class);
         $config->method('requiresConfirmation')->willReturn(false);
 
-        return new StartContactsImportFromJobTool($em, $listModel, $this->userHelper($user), $config);
+        return new StartContactsImportFromJobTool($em, $listModel, $this->userHelper($user), $config, $this->guard());
     }
 
     private function emStub(?WittyBackgroundJob $sourceJob, int $availableItems): EntityManagerInterface
@@ -165,5 +207,13 @@ class StartContactsImportFromJobToolTest extends TestCase
         (new ReflectionProperty(User::class, 'id'))->setValue($user, $id);
 
         return $user;
+    }
+
+    private function guard(): FieldWriteGuard
+    {
+        $guard = $this->createMock(FieldWriteGuard::class);
+        $guard->method('unknownAliases')->willReturn([]);
+
+        return $guard;
     }
 }

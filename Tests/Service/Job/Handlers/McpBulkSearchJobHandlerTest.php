@@ -21,6 +21,15 @@ use PHPUnit\Framework\TestCase;
  */
 class McpBulkSearchJobHandlerTest extends TestCase
 {
+    public function testDoesNotAllowMultiplePassesPerTick(): void
+    {
+        // Appelle un serveur MCP distant (debit non maitrise) : un seul
+        // passage par cron.
+        $handler = new McpBulkSearchJobHandler([], $this->createMock(EntityManagerInterface::class));
+
+        $this->assertFalse($handler->allowsMultiplePassesPerTick());
+    }
+
     public function testUnknownNamespaceFailsTheJob(): void
     {
         $em = $this->createMock(EntityManagerInterface::class);

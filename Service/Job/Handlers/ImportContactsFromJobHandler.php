@@ -11,6 +11,7 @@ use MauticPlugin\WittyBundle\Entity\WittyBackgroundJob;
 use MauticPlugin\WittyBundle\Entity\WittyBackgroundJobItem;
 use MauticPlugin\WittyBundle\Entity\WittyBackgroundJobItemRepository;
 use MauticPlugin\WittyBundle\Service\Contact\ContactImporter;
+use MauticPlugin\WittyBundle\Service\Field\FieldWriteGuard;
 use MauticPlugin\WittyBundle\Service\Job\JobHandlerInterface;
 use MauticPlugin\WittyBundle\Service\Job\JobItemFilter;
 
@@ -30,6 +31,21 @@ use MauticPlugin\WittyBundle\Service\Job\JobItemFilter;
  * Ne lit que les elements STATUS_SUCCEEDED du job source : un element deja
  * en echec cote recherche (ex. aucune correspondance Apollo) n a rien a
  * apporter a un import de contacts.
+ *
+ * Ne lit que les elements PAS ENCORE consommes (`consumedAt IS NULL`) : un
+ * meme job source peut faire l objet de PLUSIEURS imports successifs (ex.
+ * import d abord les 10 000 premiers resultats obtenus avant un plantage
+ * fournisseur, puis resume_bulk_job fait grossir le job source de 13 600
+ * resultats supplementaires, puis un second import cible seulement ceux-la).
+ * Sans ce marquage, un deuxieme import du meme job source relirait TOUS ses
+ * elements succeeded depuis le debut (offset 0), y compris ceux deja
+ * importes — inoffensif pour un rapprochement par id (updateById() re-ecrit
+ * juste les memes valeurs) mais createur de VRAIS doublons pour un
+ * rapprochement par email sans email (importOne() cree systematiquement
+ * quand aucun email n est fourni a dedoublonner). Marque consomme UNIQUEMENT
+ * au moment ou l element est reellement transmis a l importeur (pas pour un
+ * element ecarte par un filtre ou sans champ mappable : un futur import avec
+ * un mapping/des filtres differents doit encore pouvoir le reconsiderer).
  *
  * Deux modes de rapprochement, choisis AUTOMATIQUEMENT selon le type du job
  * source (jamais laisse a l appreciation de l agent, pour eviter l erreur) :
@@ -55,12 +71,24 @@ class ImportContactsFromJobHandler implements JobHandlerInterface
         private ContactImporter $importer,
         private ListModel $listModel,
         private EntityManagerInterface $em,
+        private FieldWriteGuard $fieldWriteGuard,
     ) {
     }
 
     public function getType(): string
     {
         return self::TYPE;
+    }
+
+    public function allowsMultiplePassesPerTick(): bool
+    {
+        // Aucun appel API externe ici (donnees deja stockees en base par le
+        // job de recherche source) : uniquement des ecritures Mautic
+        // internes. Command/ProcessBackgroundJobsCommand.php peut donc
+        // enchainer plusieurs lots de 50 sur ce meme job tant qu il reste du
+        // budget de temps, comme Mautic le fait lui-meme pour un import CSV
+        // (LeadBundle\Model\ImportModel::process(), aucune coupure de temps).
+        return true;
     }
 
     public function processChunk(WittyBackgroundJob $job): void
@@ -71,12 +99,12 @@ class ImportContactsFromJobHandler implements JobHandlerInterface
         $filters      = (array) ($params['filters'] ?? []);
         $segmentId    = (int) ($params['segment_id'] ?? 0);
 
-        $cursor = $job->getResumeCursor() ?? ['offset' => 0];
-        $offset = (int) ($cursor['offset'] ?? 0);
-
         /** @var WittyBackgroundJobItemRepository $sourceRepository */
         $sourceRepository = $this->em->getRepository(WittyBackgroundJobItem::class);
-        $sourceItems       = $sourceRepository->findForJob($sourceJobId, WittyBackgroundJobItem::STATUS_SUCCEEDED, self::BATCH_SIZE, $offset);
+        // Toujours offset 0 : "pas encore consomme" EST le curseur de reprise
+        // ici, un element traite ne repasse jamais dans le lot suivant, que ce
+        // soit au sein de ce job ou d un import ulterieur du meme job source.
+        $sourceItems = $sourceRepository->findForJob($sourceJobId, WittyBackgroundJobItem::STATUS_SUCCEEDED, self::BATCH_SIZE, 0, true);
 
         if ([] === $sourceItems) {
             $job->setStatus(WittyBackgroundJob::STATUS_COMPLETED);
@@ -97,6 +125,7 @@ class ImportContactsFromJobHandler implements JobHandlerInterface
             }
 
             $fields = $this->applyMapping($data, $mapping);
+            $fields = $this->fieldWriteGuard->prepare($fields, 'lead')['fields'];
 
             if ([] === $fields) {
                 $this->recordItem($job, $sourceItem->getExternalRef(), WittyBackgroundJobItem::STATUS_SKIPPED, null, 'Aucun champ mappable (mapping/donnees incompatibles).');
@@ -104,6 +133,12 @@ class ImportContactsFromJobHandler implements JobHandlerInterface
             }
 
             $segmentArg = $segment instanceof LeadList ? $segment : null;
+
+            // A partir d ici, l element est reellement transmis a l importeur :
+            // marque consomme quoi qu il arrive, pour qu il ne soit plus jamais
+            // repropose a un futur import de ce meme job source.
+            $sourceItem->setConsumedAt(new \DateTimeImmutable());
+            $this->em->persist($sourceItem);
 
             if ($matchByLeadId) {
                 $leadId = (int) $sourceItem->getExternalRef();
@@ -129,7 +164,6 @@ class ImportContactsFromJobHandler implements JobHandlerInterface
             ]);
         }
 
-        $job->setResumeCursor(['offset' => $offset + count($sourceItems)]);
         $job->setProcessedItems($job->getProcessedItems() + count($sourceItems));
 
         if (count($sourceItems) < self::BATCH_SIZE) {

@@ -48,6 +48,7 @@ class JobHandlerRegistryTest extends TestCase
         return new class($type) implements JobHandlerInterface {
             public function __construct(private string $type) {}
             public function getType(): string { return $this->type; }
+            public function allowsMultiplePassesPerTick(): bool { return false; }
             public function processChunk(WittyBackgroundJob $job): void {}
         };
     }

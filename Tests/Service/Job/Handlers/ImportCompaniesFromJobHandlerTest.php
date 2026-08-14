@@ -10,6 +10,7 @@ use MauticPlugin\WittyBundle\Entity\WittyBackgroundJob;
 use MauticPlugin\WittyBundle\Entity\WittyBackgroundJobItem;
 use MauticPlugin\WittyBundle\Entity\WittyBackgroundJobItemRepository;
 use MauticPlugin\WittyBundle\Service\Company\CompanyImporter;
+use MauticPlugin\WittyBundle\Service\Field\FieldWriteGuard;
 use MauticPlugin\WittyBundle\Service\Job\Handlers\ImportCompaniesFromJobHandler;
 use PHPUnit\Framework\TestCase;
 
@@ -22,6 +23,17 @@ use PHPUnit\Framework\TestCase;
  */
 class ImportCompaniesFromJobHandlerTest extends TestCase
 {
+    public function testAllowsMultiplePassesPerTick(): void
+    {
+        $handler = new ImportCompaniesFromJobHandler(
+            $this->createMock(CompanyImporter::class),
+            $this->createMock(EntityManagerInterface::class),
+            $this->guard(),
+        );
+
+        $this->assertTrue($handler->allowsMultiplePassesPerTick());
+    }
+
     public function testMappedItemUpdatesTheCompanyByIdAndRecordsSucceeded(): void
     {
         $sourceItem = (new WittyBackgroundJobItem())->setExternalRef('10')->setStatus(WittyBackgroundJobItem::STATUS_SUCCEEDED)->setData(['industry' => 'Software']);
@@ -45,10 +57,11 @@ class ImportCompaniesFromJobHandlerTest extends TestCase
 
         $job = (new WittyBackgroundJob())->setParams(['source_job_id' => 1, 'mapping' => ['companyindustry' => 'industry'], 'filters' => []]);
 
-        (new ImportCompaniesFromJobHandler($importer, $em))->processChunk($job);
+        (new ImportCompaniesFromJobHandler($importer, $em, $this->guard()))->processChunk($job);
 
         $this->assertCount(1, $recorded);
         $this->assertSame(WittyBackgroundJobItem::STATUS_SUCCEEDED, $recorded[0]->getStatus());
+        $this->assertNotNull($sourceItem->getConsumedAt());
     }
 
     public function testMissingCompanyIsRecordedAsFailedNeverCreated(): void
@@ -72,7 +85,7 @@ class ImportCompaniesFromJobHandlerTest extends TestCase
 
         $job = (new WittyBackgroundJob())->setParams(['source_job_id' => 1, 'mapping' => ['companyindustry' => 'industry'], 'filters' => []]);
 
-        (new ImportCompaniesFromJobHandler($importer, $em))->processChunk($job);
+        (new ImportCompaniesFromJobHandler($importer, $em, $this->guard()))->processChunk($job);
 
         $this->assertSame(WittyBackgroundJobItem::STATUS_FAILED, $recorded[0]->getStatus());
     }
@@ -96,6 +109,33 @@ class ImportCompaniesFromJobHandlerTest extends TestCase
             'filters'       => [['op' => 'field_equals', 'path' => 'estimated_num_employees', 'value' => 50]],
         ]);
 
-        (new ImportCompaniesFromJobHandler($importer, $em))->processChunk($job);
+        (new ImportCompaniesFromJobHandler($importer, $em, $this->guard()))->processChunk($job);
+
+        $this->assertNull($sourceItem->getConsumedAt());
+    }
+
+    public function testQueriesOnlyUnconsumedItems(): void
+    {
+        $itemRepository = $this->createMock(WittyBackgroundJobItemRepository::class);
+        $itemRepository->expects($this->once())->method('findForJob')
+            ->with($this->anything(), $this->anything(), $this->anything(), $this->anything(), true)
+            ->willReturn([]);
+
+        $em = $this->createMock(EntityManagerInterface::class);
+        $em->method('getRepository')->willReturn($itemRepository);
+
+        $job = (new WittyBackgroundJob())->setParams(['source_job_id' => 1, 'mapping' => ['companyindustry' => 'industry'], 'filters' => []]);
+
+        (new ImportCompaniesFromJobHandler($this->createMock(CompanyImporter::class), $em, $this->guard()))->processChunk($job);
+    }
+
+    private function guard(): FieldWriteGuard
+    {
+        $guard = $this->createMock(FieldWriteGuard::class);
+        $guard->method('prepare')->willReturnCallback(
+            static fn (array $fields): array => ['fields' => $fields, 'unknown' => []],
+        );
+
+        return $guard;
     }
 }

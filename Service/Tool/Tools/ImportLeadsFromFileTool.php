@@ -9,6 +9,7 @@ use Mautic\LeadBundle\Model\LeadModel;
 use MauticPlugin\WittyBundle\Service\Attachment\AttachmentManager;
 use MauticPlugin\WittyBundle\Service\Attachment\Exception\AttachmentInvalidException;
 use MauticPlugin\WittyBundle\Service\Attachment\Exception\AttachmentNotFoundException;
+use MauticPlugin\WittyBundle\Service\Field\FieldWriteGuard;
 use MauticPlugin\WittyBundle\Service\Tool\AbstractTool;
 use MauticPlugin\WittyBundle\Service\WittyConfig;
 
@@ -32,6 +33,7 @@ class ImportLeadsFromFileTool extends AbstractTool
         private AttachmentManager $attachments,
         private LeadModel $leadModel,
         private WittyConfig $config,
+        private FieldWriteGuard $fieldWriteGuard,
     ) {
     }
 
@@ -86,6 +88,18 @@ class ImportLeadsFromFileTool extends AbstractTool
             return ['status' => 'error', 'error' => 'column_mapping doit mapper une colonne sur "email".'];
         }
 
+        $unknownAliases = $this->fieldWriteGuard->unknownAliases(array_values($mapping), 'lead');
+
+        if ([] !== $unknownAliases) {
+            return [
+                'status' => 'error',
+                'error'  => sprintf(
+                    "Alias de champ inconnu dans column_mapping : %s. Verifie l orthographe avec l outil list_fields (object: 'contact') avant de reessayer.",
+                    implode(', ', $unknownAliases),
+                ),
+            ];
+        }
+
         try {
             $attachment = $this->attachments->resolve((int) ($arguments['attachment_id'] ?? 0));
             $data       = $this->attachments->readSpreadsheetAll($attachment);
@@ -107,6 +121,7 @@ class ImportLeadsFromFileTool extends AbstractTool
         $headerIndex    = array_flip($data['headers']);
         $unknownColumns = array_values(array_diff(array_keys($mapping), $data['headers']));
         $mapped         = $this->mapRows($data['rows'], $mapping, $headerIndex);
+        $mapped['valid'] = $this->fieldWriteGuard->prepareMany($mapped['valid'], 'lead')['rows'];
 
         if ($this->config->requiresConfirmation() && true !== ($arguments['confirmed'] ?? false)) {
             return $this->confirmationRequired([

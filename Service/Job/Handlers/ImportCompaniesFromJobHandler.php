@@ -9,6 +9,7 @@ use MauticPlugin\WittyBundle\Entity\WittyBackgroundJob;
 use MauticPlugin\WittyBundle\Entity\WittyBackgroundJobItem;
 use MauticPlugin\WittyBundle\Entity\WittyBackgroundJobItemRepository;
 use MauticPlugin\WittyBundle\Service\Company\CompanyImporter;
+use MauticPlugin\WittyBundle\Service\Field\FieldWriteGuard;
 use MauticPlugin\WittyBundle\Service\Job\JobHandlerInterface;
 use MauticPlugin\WittyBundle\Service\Job\JobItemFilter;
 
@@ -23,6 +24,13 @@ use MauticPlugin\WittyBundle\Service\Job\JobItemFilter;
  * job d'enrichissement), jamais de creation : contrairement aux contacts, il
  * n'existe pas de scenario "recherche externe -> nouvelle entreprise" ici,
  * seulement "entreprise deja connue -> enrichissement".
+ *
+ * Ne lit que les elements PAS ENCORE consommes (`consumedAt IS NULL`), meme
+ * raison qu'ImportContactsFromJobHandler (job source pouvant grossir entre
+ * deux imports via resume_bulk_job) : ici updateById() est idempotent (pas de
+ * risque de doublon a proprement parler), mais retraiter inutilement des
+ * milliers d'elements deja appliques a chaque nouvel import du meme job
+ * source resterait un gaspillage evitable.
  */
 class ImportCompaniesFromJobHandler implements JobHandlerInterface
 {
@@ -33,12 +41,20 @@ class ImportCompaniesFromJobHandler implements JobHandlerInterface
     public function __construct(
         private CompanyImporter $importer,
         private EntityManagerInterface $em,
+        private FieldWriteGuard $fieldWriteGuard,
     ) {
     }
 
     public function getType(): string
     {
         return self::TYPE;
+    }
+
+    public function allowsMultiplePassesPerTick(): bool
+    {
+        // Meme raison qu'ImportContactsFromJobHandler : aucun appel API
+        // externe, uniquement des ecritures Mautic internes.
+        return true;
     }
 
     public function processChunk(WittyBackgroundJob $job): void
@@ -48,12 +64,9 @@ class ImportCompaniesFromJobHandler implements JobHandlerInterface
         $mapping     = (array) ($params['mapping'] ?? []);
         $filters     = (array) ($params['filters'] ?? []);
 
-        $cursor = $job->getResumeCursor() ?? ['offset' => 0];
-        $offset = (int) ($cursor['offset'] ?? 0);
-
         /** @var WittyBackgroundJobItemRepository $sourceRepository */
         $sourceRepository = $this->em->getRepository(WittyBackgroundJobItem::class);
-        $sourceItems      = $sourceRepository->findForJob($sourceJobId, WittyBackgroundJobItem::STATUS_SUCCEEDED, self::BATCH_SIZE, $offset);
+        $sourceItems      = $sourceRepository->findForJob($sourceJobId, WittyBackgroundJobItem::STATUS_SUCCEEDED, self::BATCH_SIZE, 0, true);
 
         if ([] === $sourceItems) {
             $job->setStatus(WittyBackgroundJob::STATUS_COMPLETED);
@@ -70,11 +83,17 @@ class ImportCompaniesFromJobHandler implements JobHandlerInterface
             }
 
             $fields = $this->applyMapping($data, $mapping);
+            $fields = $this->fieldWriteGuard->prepare($fields, 'company')['fields'];
 
             if ([] === $fields) {
                 $this->recordItem($job, $sourceItem->getExternalRef(), WittyBackgroundJobItem::STATUS_SKIPPED, null, 'Aucun champ mappable (mapping/donnees incompatibles).');
                 continue;
             }
+
+            // A partir d ici, l element est reellement transmis a l importeur :
+            // marque consomme quoi qu il arrive (meme raison qu'ImportContactsFromJobHandler).
+            $sourceItem->setConsumedAt(new \DateTimeImmutable());
+            $this->em->persist($sourceItem);
 
             $companyId = (int) $sourceItem->getExternalRef();
             $company   = $this->importer->updateById($companyId, $fields);
@@ -87,7 +106,6 @@ class ImportCompaniesFromJobHandler implements JobHandlerInterface
             $this->recordItem($job, $sourceItem->getExternalRef(), WittyBackgroundJobItem::STATUS_SUCCEEDED, ['company_id' => $company->getId()]);
         }
 
-        $job->setResumeCursor(['offset' => $offset + count($sourceItems)]);
         $job->setProcessedItems($job->getProcessedItems() + count($sourceItems));
 
         if (count($sourceItems) < self::BATCH_SIZE) {

@@ -9,6 +9,7 @@ use Mautic\LeadBundle\Entity\LeadList;
 use Mautic\LeadBundle\Entity\LeadRepository;
 use Mautic\LeadBundle\Model\LeadModel;
 use Mautic\LeadBundle\Model\ListModel;
+use MauticPlugin\WittyBundle\Service\Field\FieldWriteGuard;
 use MauticPlugin\WittyBundle\Service\Tool\Tools\BulkCreateContactsTool;
 use MauticPlugin\WittyBundle\Service\WittyConfig;
 use PHPUnit\Framework\TestCase;
@@ -175,11 +176,33 @@ class BulkCreateContactsToolTest extends TestCase
         $this->assertSame('Prospects Q1', $output['preview']['segment']);
     }
 
+    public function testUnknownFieldAliasIsRejected(): void
+    {
+        $leadModel = $this->createMock(LeadModel::class);
+        $leadModel->expects($this->never())->method('saveEntity');
+
+        $fieldWriteGuard = $this->createMock(FieldWriteGuard::class);
+        $fieldWriteGuard->method('prepareMany')->willReturn(['rows' => [], 'unknown' => ['linkedin_url']]);
+
+        $config = $this->createMock(WittyConfig::class);
+        $config->method('requiresConfirmation')->willReturn(false);
+
+        $tool   = new BulkCreateContactsTool($leadModel, $this->createMock(ListModel::class), $config, $fieldWriteGuard);
+        $output = $tool->execute(['contacts' => [['linkedin_url' => 'https://linkedin.com/in/x']]]);
+
+        $this->assertSame('error', $output['status']);
+    }
+
     private function tool(LeadModel $leadModel, ListModel $listModel, bool $requiresConfirmation): BulkCreateContactsTool
     {
         $config = $this->createMock(WittyConfig::class);
         $config->method('requiresConfirmation')->willReturn($requiresConfirmation);
 
-        return new BulkCreateContactsTool($leadModel, $listModel, $config);
+        $fieldWriteGuard = $this->createMock(FieldWriteGuard::class);
+        $fieldWriteGuard->method('prepareMany')->willReturnCallback(
+            static fn (array $rows): array => ['rows' => $rows, 'unknown' => []],
+        );
+
+        return new BulkCreateContactsTool($leadModel, $listModel, $config, $fieldWriteGuard);
     }
 }

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MauticPlugin\WittyBundle\Service\Tool\Tools;
 
 use Mautic\LeadBundle\Model\CompanyModel;
+use MauticPlugin\WittyBundle\Service\Field\FieldWriteGuard;
 use MauticPlugin\WittyBundle\Service\Tool\AbstractTool;
 use MauticPlugin\WittyBundle\Service\WittyConfig;
 
@@ -13,6 +14,7 @@ class UpdateCompanyTool extends AbstractTool
     public function __construct(
         private CompanyModel $companyModel,
         private WittyConfig $config,
+        private FieldWriteGuard $fieldWriteGuard,
     ) {
     }
 
@@ -65,6 +67,20 @@ class UpdateCompanyTool extends AbstractTool
         if ([] === $fields) {
             return ['status' => 'error', 'error' => 'fields est obligatoire et ne peut pas etre vide.'];
         }
+
+        $prepared = $this->fieldWriteGuard->prepare($fields, 'company');
+
+        if ([] !== $prepared['unknown']) {
+            return [
+                'status' => 'error',
+                'error'  => sprintf(
+                    "Alias de champ inconnu : %s. Verifie l orthographe avec l outil list_fields (object: 'company') avant de reessayer.",
+                    implode(', ', $prepared['unknown']),
+                ),
+            ];
+        }
+
+        $fields = $prepared['fields'];
 
         $company = $this->companyModel->getEntity($id);
 

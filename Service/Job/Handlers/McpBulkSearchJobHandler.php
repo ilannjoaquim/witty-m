@@ -45,6 +45,14 @@ class McpBulkSearchJobHandler implements JobHandlerInterface
         return self::TYPE;
     }
 
+    public function allowsMultiplePassesPerTick(): bool
+    {
+        // Appelle un serveur MCP distant (fournisseur inconnu a la
+        // compilation, limite de debit non maitrisee) a chaque passage :
+        // rester a un lot par minute.
+        return false;
+    }
+
     public function processChunk(WittyBackgroundJob $job): void
     {
         $params = $job->getParams();

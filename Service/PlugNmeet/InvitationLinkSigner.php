@@ -20,6 +20,13 @@ use Symfony\Component\Routing\Generator\UrlGeneratorInterface;
  * ne sert qu'a franchir /meet/join/{token}, qui mint le vrai jeton a la volee
  * au moment du clic (voir JoinController). D'ou une duree de vie longue (30
  * jours par defaut) sans compromettre la securite du join lui-meme.
+ *
+ * `lead_id` est NULLABLE : un lien "partageable" (genere depuis la section
+ * Rooms, pas rattache a un contact precis) porte lead_id=null dans sa charge
+ * utile — c'est ce qui indique a MeetJoinController de demander son nom au
+ * visiteur au lieu de le resoudre automatiquement depuis un Lead. Consequence
+ * assumee : aucun suivi de presence individuel n'est possible pour ce type de
+ * lien (ReconcileMeetAttendanceCommand ne recherche que le prefixe `lead-`).
  */
 class InvitationLinkSigner
 {
@@ -34,7 +41,7 @@ class InvitationLinkSigner
     /**
      * @return array{token: string, url: string}
      */
-    public function sign(int $leadId, string $roomId, ?string $roomTitle = null, int $ttlDays = self::DEFAULT_TTL_DAYS): array
+    public function sign(?int $leadId, string $roomId, ?string $roomTitle = null, int $ttlDays = self::DEFAULT_TTL_DAYS): array
     {
         $payload = [
             'lead_id' => $leadId,
@@ -51,7 +58,7 @@ class InvitationLinkSigner
     }
 
     /**
-     * @return array{lead_id: int, room_id: string}|null null si absent, expire ou signature invalide.
+     * @return array{lead_id: ?int, room_id: string}|null null si absent, expire ou signature invalide.
      */
     public function verify(string $token): ?array
     {
@@ -71,8 +78,9 @@ class InvitationLinkSigner
         $payload = null !== $json ? json_decode($json, true) : null;
 
         if (!is_array($payload)
-            || !isset($payload['lead_id'], $payload['room_id'], $payload['exp'])
-            || !is_int($payload['lead_id'])
+            || !array_key_exists('lead_id', $payload)
+            || !isset($payload['room_id'], $payload['exp'])
+            || !(null === $payload['lead_id'] || is_int($payload['lead_id']))
             || !is_string($payload['room_id'])
             || !is_int($payload['exp'])
         ) {

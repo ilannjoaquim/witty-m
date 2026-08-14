@@ -20,7 +20,7 @@ return [
     // Le changement de version declenche Engine::up() sur Migrations/ au prochain
     // mautic:plugins:reload : c'est ce qui cree les tables sur une instance ou le
     // plugin etait deja installe.
-    'version'     => '3.0.0',
+    'version'     => '3.2.0',
     'author'      => 'Witty',
 
     'routes' => [
@@ -171,6 +171,11 @@ return [
                 'controller' => VideoconferenceController::class.'::roomsLinkAction',
                 'method'     => 'POST',
             ],
+            'witty_video_rooms_shareable_link' => [
+                'path'       => '/witty/video/rooms/shareable-link',
+                'controller' => VideoconferenceController::class.'::roomsShareableLinkAction',
+                'method'     => 'POST',
+            ],
 
             'witty_video_past_rooms' => [
                 'path'       => '/witty/video/past-rooms',
@@ -227,6 +232,11 @@ return [
                 'path'       => '/meet/join/{token}',
                 'controller' => MeetJoinController::class.'::joinAction',
                 'method'     => 'GET',
+            ],
+            'witty_meet_join_anonymous' => [
+                'path'       => '/meet/join/{token}/enter',
+                'controller' => MeetJoinController::class.'::joinAnonymousAction',
+                'method'     => 'POST',
             ],
             'witty_meet_slots_availability' => [
                 'path'         => '/witty/meet/slots/{fieldId}',

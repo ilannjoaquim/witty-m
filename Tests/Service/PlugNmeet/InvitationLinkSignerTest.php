@@ -28,6 +28,22 @@ class InvitationLinkSignerTest extends TestCase
         $this->assertStringContainsString($result['token'], $result['url']);
     }
 
+    /**
+     * Le lien "partageable" (section Rooms, pas rattache a un contact) porte
+     * lead_id=null : c'est ce que MeetJoinController::joinAction() lit pour
+     * decider d'afficher le formulaire "quel est votre nom ?" au lieu de
+     * resoudre un Lead automatiquement.
+     */
+    public function testSignWithNullLeadIdRoundTrips(): void
+    {
+        $signer = $this->signer();
+
+        $result = $signer->sign(null, 'team-standup');
+        $claims = $signer->verify($result['token']);
+
+        $this->assertSame(['lead_id' => null, 'room_id' => 'team-standup'], $claims);
+    }
+
     public function testTamperedPayloadIsRejected(): void
     {
         $signer = $this->signer();
@@ -68,6 +84,30 @@ class InvitationLinkSignerTest extends TestCase
         $signer = $this->signer($secret);
 
         $payload   = ['lead_id' => 42, 'room_id' => 'team-standup', 'exp' => time() - 10];
+        $body      = rtrim(strtr(base64_encode(json_encode($payload)), '+/', '-_'), '=');
+        $signature = hash_hmac('sha256', $body, $secret);
+
+        $this->assertNull($signer->verify($body.'.'.$signature));
+    }
+
+    public function testPayloadWithInvalidLeadIdTypeIsRejected(): void
+    {
+        $secret = 'test-secret-key';
+        $signer = $this->signer($secret);
+
+        $payload   = ['lead_id' => 'not-an-int', 'room_id' => 'team-standup', 'exp' => time() + 86400];
+        $body      = rtrim(strtr(base64_encode(json_encode($payload)), '+/', '-_'), '=');
+        $signature = hash_hmac('sha256', $body, $secret);
+
+        $this->assertNull($signer->verify($body.'.'.$signature));
+    }
+
+    public function testPayloadMissingLeadIdKeyEntirelyIsRejected(): void
+    {
+        $secret = 'test-secret-key';
+        $signer = $this->signer($secret);
+
+        $payload   = ['room_id' => 'team-standup', 'exp' => time() + 86400];
         $body      = rtrim(strtr(base64_encode(json_encode($payload)), '+/', '-_'), '=');
         $signature = hash_hmac('sha256', $body, $secret);
 

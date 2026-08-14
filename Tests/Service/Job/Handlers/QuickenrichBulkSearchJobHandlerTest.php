@@ -20,6 +20,14 @@ use PHPUnit\Framework\TestCase;
  */
 class QuickenrichBulkSearchJobHandlerTest extends TestCase
 {
+    public function testDoesNotAllowMultiplePassesPerTick(): void
+    {
+        // Appelle QuickEnrich (API externe) : un seul passage par cron.
+        $handler = new QuickenrichBulkSearchJobHandler($this->createMock(QuickenrichClient::class), $this->createMock(EntityManagerInterface::class));
+
+        $this->assertFalse($handler->allowsMultiplePassesPerTick());
+    }
+
     public function testFullPageUnderTargetKeepsJobRunning(): void
     {
         $client = $this->createMock(QuickenrichClient::class);

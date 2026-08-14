@@ -13,6 +13,7 @@ use MauticPlugin\WittyBundle\Entity\WittyBackgroundJobItem;
 use MauticPlugin\WittyBundle\Entity\WittyBackgroundJobItemRepository;
 use MauticPlugin\WittyBundle\Entity\WittyBackgroundJobRepository;
 use MauticPlugin\WittyBundle\Service\Contact\ContactImporter;
+use MauticPlugin\WittyBundle\Service\Field\FieldWriteGuard;
 use MauticPlugin\WittyBundle\Service\Job\Handlers\ApolloBulkEnrichPeopleJobHandler;
 use MauticPlugin\WittyBundle\Service\Job\Handlers\ImportContactsFromJobHandler;
 use PHPUnit\Framework\TestCase;
@@ -31,11 +32,25 @@ use ReflectionProperty;
  */
 class ImportContactsFromJobHandlerTest extends TestCase
 {
+    public function testAllowsMultiplePassesPerTick(): void
+    {
+        // Aucun appel API externe (donnees deja stockees par le job source) :
+        // peut enchainer plusieurs lots dans le meme passage de cron.
+        $handler = new ImportContactsFromJobHandler(
+            $this->createMock(ContactImporter::class),
+            $this->createMock(ListModel::class),
+            $this->createMock(EntityManagerInterface::class),
+            $this->guard(),
+        );
+
+        $this->assertTrue($handler->allowsMultiplePassesPerTick());
+    }
+
     public function testOnlySucceededSourceItemsAreConsidered(): void
     {
         $itemRepository = $this->createMock(WittyBackgroundJobItemRepository::class);
         $itemRepository->expects($this->once())->method('findForJob')
-            ->with(42, WittyBackgroundJobItem::STATUS_SUCCEEDED, $this->anything(), 0)
+            ->with(42, WittyBackgroundJobItem::STATUS_SUCCEEDED, $this->anything(), 0, true)
             ->willReturn([]);
 
         $em = $this->createMock(EntityManagerInterface::class);
@@ -46,7 +61,7 @@ class ImportContactsFromJobHandlerTest extends TestCase
 
         $job = (new WittyBackgroundJob())->setParams(['source_job_id' => 42, 'mapping' => ['email' => 'email'], 'filters' => []]);
 
-        (new ImportContactsFromJobHandler($importer, $listModel, $em))->processChunk($job);
+        (new ImportContactsFromJobHandler($importer, $listModel, $em, $this->guard()))->processChunk($job);
 
         $this->assertSame(WittyBackgroundJob::STATUS_COMPLETED, $job->getStatus());
     }
@@ -76,10 +91,13 @@ class ImportContactsFromJobHandlerTest extends TestCase
             'filters'       => [['op' => 'field_equals', 'path' => 'has_email', 'value' => true]],
         ]);
 
-        (new ImportContactsFromJobHandler($importer, $this->createMock(ListModel::class), $em))->processChunk($job);
+        (new ImportContactsFromJobHandler($importer, $this->createMock(ListModel::class), $em, $this->guard()))->processChunk($job);
 
         $this->assertCount(1, $recorded);
         $this->assertSame(WittyBackgroundJobItem::STATUS_SKIPPED, $recorded[0]->getStatus());
+        // Un element ecarte par un filtre doit rester eligible a un futur
+        // import avec des filtres differents : jamais marque consomme.
+        $this->assertNull($sourceItem->getConsumedAt());
     }
 
     public function testMappedItemIsImportedAndRecordedAsSucceeded(): void
@@ -113,11 +131,35 @@ class ImportContactsFromJobHandlerTest extends TestCase
             'filters'       => [],
         ]);
 
-        (new ImportContactsFromJobHandler($importer, $this->createMock(ListModel::class), $em))->processChunk($job);
+        (new ImportContactsFromJobHandler($importer, $this->createMock(ListModel::class), $em, $this->guard()))->processChunk($job);
 
         $this->assertCount(1, $recorded);
         $this->assertSame(WittyBackgroundJobItem::STATUS_SUCCEEDED, $recorded[0]->getStatus());
         $this->assertSame(77, $recorded[0]->getData()['contact_id']);
+        // Element reellement transmis a l importeur : marque consomme, pour
+        // qu un futur import du meme job source (ex. apres resume_bulk_job)
+        // ne le retraite jamais et ne cree pas de doublon.
+        $this->assertNotNull($sourceItem->getConsumedAt());
+    }
+
+    public function testAlreadyConsumedItemsAreExcludedFromTheQuery(): void
+    {
+        // Ne verifie pas le filtrage SQL lui-meme (couvert par le
+        // comportement reel de onlyUnconsumed dans le repository, teste
+        // separement) mais que le handler DEMANDE bien onlyUnconsumed=true —
+        // sans ca, un deuxieme import du meme job source relirait tout
+        // depuis le debut.
+        $itemRepository = $this->createMock(WittyBackgroundJobItemRepository::class);
+        $itemRepository->expects($this->once())->method('findForJob')
+            ->with($this->anything(), $this->anything(), $this->anything(), $this->anything(), true)
+            ->willReturn([]);
+
+        $em = $this->createMock(EntityManagerInterface::class);
+        $em->method('getRepository')->willReturn($itemRepository);
+
+        $job = (new WittyBackgroundJob())->setParams(['source_job_id' => 1, 'mapping' => ['email' => 'email'], 'filters' => []]);
+
+        (new ImportContactsFromJobHandler($this->createMock(ContactImporter::class), $this->createMock(ListModel::class), $em, $this->guard()))->processChunk($job);
     }
 
     public function testSegmentIsResolvedAndPassedToTheImporter(): void
@@ -144,7 +186,7 @@ class ImportContactsFromJobHandlerTest extends TestCase
             'source_job_id' => 1, 'mapping' => ['email' => 'email'], 'filters' => [], 'segment_id' => 9,
         ]);
 
-        (new ImportContactsFromJobHandler($importer, $listModel, $em))->processChunk($job);
+        (new ImportContactsFromJobHandler($importer, $listModel, $em, $this->guard()))->processChunk($job);
     }
 
     public function testEnrichmentSourceUpdatesByIdNeverCreates(): void
@@ -175,7 +217,7 @@ class ImportContactsFromJobHandlerTest extends TestCase
 
         $job = (new WittyBackgroundJob())->setParams(['source_job_id' => 77, 'mapping' => ['title' => 'title'], 'filters' => []]);
 
-        (new ImportContactsFromJobHandler($importer, $this->createMock(ListModel::class), $em))->processChunk($job);
+        (new ImportContactsFromJobHandler($importer, $this->createMock(ListModel::class), $em, $this->guard()))->processChunk($job);
     }
 
     public function testEnrichmentSourceRecordsFailureWhenLeadNoLongerExists(): void
@@ -207,7 +249,7 @@ class ImportContactsFromJobHandlerTest extends TestCase
 
         $job = (new WittyBackgroundJob())->setParams(['source_job_id' => 77, 'mapping' => ['title' => 'title'], 'filters' => []]);
 
-        (new ImportContactsFromJobHandler($importer, $this->createMock(ListModel::class), $em))->processChunk($job);
+        (new ImportContactsFromJobHandler($importer, $this->createMock(ListModel::class), $em, $this->guard()))->processChunk($job);
 
         $this->assertCount(1, $recorded);
         $this->assertSame(WittyBackgroundJobItem::STATUS_FAILED, $recorded[0]->getStatus());
@@ -216,5 +258,15 @@ class ImportContactsFromJobHandlerTest extends TestCase
     private function sourceItem(string $ref, array $data): WittyBackgroundJobItem
     {
         return (new WittyBackgroundJobItem())->setExternalRef($ref)->setStatus(WittyBackgroundJobItem::STATUS_SUCCEEDED)->setData($data);
+    }
+
+    private function guard(): FieldWriteGuard
+    {
+        $guard = $this->createMock(FieldWriteGuard::class);
+        $guard->method('prepare')->willReturnCallback(
+            static fn (array $fields): array => ['fields' => $fields, 'unknown' => []],
+        );
+
+        return $guard;
     }
 }

@@ -49,6 +49,7 @@ class PromptBuilder
 
             Regles de travail :
             - Avant de creer quoi que ce soit, utilise list_entities pour verifier si l objet existe deja et pour recuperer les identifiants numeriques. N invente jamais un ID.
+            - Pour ecrire un champ de contact/entreprise (create_contact, update_contact, bulk_create_contacts, create_company, update_company, import_leads_from_file, mapping de start_contacts_import_from_job/start_companies_import_from_job) sans etre certain de l alias exact ou des valeurs acceptees (ex. un champ select comme le secteur d activite), appelle list_fields(object) au prealable plutot que de deviner un alias par analogie avec le fournisseur de donnees d origine (ex. le champ Apollo/QuickEnrich est linkedin_url, le champ Mautic correspondant est linkedin — ce sont deux noms differents, ne les confonds jamais). Un alias inconnu est rejete avec une erreur explicite listant l alias en cause : dans ce cas, appelle list_fields puis reessaie avec le bon alias, ne l ignore pas.
             - Pour un email, regarde d abord list_email_templates : si un template correspond au besoin, passe par create_email_from_template et respecte les consignes de chaque emplacement. Ne recopie jamais le HTML d un template a la main.
             - Meme logique pour une landing page avec du JavaScript fonctionnel (compte a rebours, etats dynamiques) : regarde list_page_templates et passe par create_page_from_template. Ces pages sont enregistrees en mode code source expres, ne propose jamais de les ouvrir dans un builder visuel.
             - Les tokens Mautic type {contactfield=xxx} ne fonctionnent QUE dans un email (traites par MailHelper a l envoi, un email est toujours adresse a un contact connu) : ne les ecris JAMAIS dans le HTML d une landing page, le visiteur peut etre totalement anonyme et Mautic ne les y remplace jamais (verifie dans le code source de PublicController — aucune substitution de token de champ contact sur une page). Pour personnaliser une landing page, propose le Dynamic Content de Mautic (blocs conditionnels par segment) ou du JavaScript cote client, jamais un merge tag serveur.
@@ -269,15 +270,36 @@ class PromptBuilder
             .'ID, ne cree jamais de doublon — rien a preciser, c est detecte tout seul depuis le type du job source. '
             .'Meme logique cote entreprises avec start_companies_import_from_job (toujours une mise a jour, jamais '
             .'une creation, une entreprise n a pas d identifiant fiable equivalent a l email d un contact). '
+            .'Un job source status=failed (ex. erreur 500/timeout du fournisseur en cours de pagination) N EST '
+            .'PAS PERDU et ne doit JAMAIS declencher une recherche relancee depuis zero par reflexe : le curseur '
+            .'de reprise interne de chaque job (resumeCursor) n avance qu apres un appel fournisseur reussi, donc '
+            .'un job failed pointe deja exactement sur la derniere position confirmee, jamais sur une position '
+            .'perdue ou a deviner. resume_bulk_job(job_id) relance CE job precis exactement ou il s est arrete — '
+            .'c est le premier reflexe des qu un check_bulk_job montre status=failed avec un error_message qui '
+            .'ressemble a un incident ponctuel plutot qu a un probleme de configuration durable (cle API invalide, '
+            .'quota epuise...). Importer et reprendre ne s excluent PAS : importer les resultats deja acquis '
+            .'MAINTENANT (start_contacts_import_from_job/start_companies_import_from_job acceptent un job failed '
+            .'tel quel des que succeeded_items > 0, previens l utilisateur que c est partiel via partial:true) PUIS '
+            .'reprendre CE MEME job plus tard (resume_bulk_job) pour continuer a le faire grossir PUIS relancer '
+            .'l import une seconde fois sur le meme source_job_id est totalement sur : chaque import ne retraite '
+            .'jamais ce qu un import precedent a deja transmis a Mautic (marquage interne par element, invisible '
+            .'pour toi), donc aucun risque de doublon meme sans email a dedoublonner — un deuxieme '
+            .'start_contacts_import_from_job sur un job deja partiellement importe ne recupere QUE le surplus '
+            .'obtenu depuis. Si resume_bulk_job refuse (plafond de tentatives atteint, ou le probleme est '
+            .'manifestement durable), importe ce qui est deja exploitable puis relance une recherche separee '
+            .'seulement pour ce qui manque reellement (jamais tout depuis le debut). '
             .'IMPORTANT : bulk_create_contacts/update_contact/start_contacts_import_from_job/start_companies_import_from_job '
             .'ne confirment JAMAIS quels champs ont ete reellement enregistres, seulement un nombre de '
             .'contacts/entreprises crees ou mis a jour — ne dis donc jamais a l utilisateur qu un champ precis '
             .'(ex. "j ai bien mis le lien LinkedIn") a ete enregistre avec succes sans l avoir toi-meme verifie '
-            .'(relis le contact/l entreprise, ex. via search_contacts, apres coup). Un champ absent de la donnee '
-            .'source (ex. QuickEnrich ne renvoie pas toujours linkedin/country selon les filtres demandes) ou un '
-            .'chemin de mapping incorrect (aucune erreur remontee, le champ est juste absent silencieusement, cf. '
-            .'JobItemFilter::resolvePath) fait que le champ reste vide sans qu aucun outil ne te previenne — ne '
-            .'presente jamais une supposition comme un fait acquis.';
+            .'(relis le contact/l entreprise, ex. via search_contacts, apres coup). Un alias de champ Mautic qui '
+            .'n existe pas (ex. linkedin_url au lieu de linkedin) est desormais rejete explicitement avec une '
+            .'erreur — en cas de doute sur l alias exact ou les valeurs acceptees (select/multiselect), appelle '
+            .'list_fields(object) AVANT d ecrire plutot que de deviner. Ce qui reste silencieux, en revanche : un '
+            .'champ absent de la donnee source (ex. QuickEnrich ne renvoie pas toujours linkedin/country selon les '
+            .'filtres demandes) ou un chemin de mapping incorrect vers cette donnee source (aucune erreur remontee, '
+            .'le champ est juste absent, cf. JobItemFilter::resolvePath) — la aussi, ne presente jamais une '
+            .'supposition comme un fait acquis, verifie.';
     }
 
     /**

@@ -57,6 +57,32 @@ class CheckBulkJobToolTest extends TestCase
         $this->assertSame(120, $output['job']['processed_items']);
     }
 
+    public function testResumeCountIsOmittedWhenNeverResumed(): void
+    {
+        $user = $this->userWithId(1);
+        $job  = (new WittyBackgroundJob())->setType('t')->setLabel('X')->setCreatedBy($user);
+
+        $repository = $this->createMock(WittyBackgroundJobRepository::class);
+        $repository->method('find')->willReturn($job);
+
+        $output = $this->tool($repository, $user)->execute(['job_id' => 42]);
+
+        $this->assertArrayNotHasKey('resume_count', $output['job']);
+    }
+
+    public function testResumeCountIsExposedOnceAJobHasBeenResumed(): void
+    {
+        $user = $this->userWithId(1);
+        $job  = (new WittyBackgroundJob())->setType('t')->setLabel('X')->setCreatedBy($user)->setResumeCount(2);
+
+        $repository = $this->createMock(WittyBackgroundJobRepository::class);
+        $repository->method('find')->willReturn($job);
+
+        $output = $this->tool($repository, $user)->execute(['job_id' => 42]);
+
+        $this->assertSame(2, $output['job']['resume_count']);
+    }
+
     public function testNoArgumentsListsRecentJobsForCurrentUser(): void
     {
         $user = $this->userWithId(1);

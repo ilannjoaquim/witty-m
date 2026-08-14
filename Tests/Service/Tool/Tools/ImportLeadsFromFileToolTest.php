@@ -9,6 +9,7 @@ use Mautic\LeadBundle\Entity\LeadRepository;
 use Mautic\LeadBundle\Model\LeadModel;
 use MauticPlugin\WittyBundle\Entity\WittyAttachment;
 use MauticPlugin\WittyBundle\Service\Attachment\AttachmentManager;
+use MauticPlugin\WittyBundle\Service\Field\FieldWriteGuard;
 use MauticPlugin\WittyBundle\Service\Tool\Tools\ImportLeadsFromFileTool;
 use MauticPlugin\WittyBundle\Service\WittyConfig;
 use PHPUnit\Framework\TestCase;
@@ -132,11 +133,37 @@ class ImportLeadsFromFileToolTest extends TestCase
         return $attachments;
     }
 
+    public function testUnknownFieldAliasInMappingIsRejectedBeforeReadingTheFile(): void
+    {
+        $attachments = $this->createMock(AttachmentManager::class);
+        $attachments->expects($this->never())->method('resolve');
+
+        $fieldWriteGuard = $this->createMock(FieldWriteGuard::class);
+        $fieldWriteGuard->method('unknownAliases')->willReturn(['linkedin_url']);
+
+        $config = $this->createMock(WittyConfig::class);
+        $config->method('requiresConfirmation')->willReturn(true);
+
+        $tool   = new ImportLeadsFromFileTool($attachments, $this->createMock(LeadModel::class), $config, $fieldWriteGuard);
+        $output = $tool->execute([
+            'attachment_id'  => 1,
+            'column_mapping' => ['Email' => 'email', 'Lien' => 'linkedin_url'],
+        ]);
+
+        $this->assertSame('error', $output['status']);
+    }
+
     private function tool(AttachmentManager $attachments, LeadModel $leadModel, bool $requiresConfirmation): ImportLeadsFromFileTool
     {
         $config = $this->createMock(WittyConfig::class);
         $config->method('requiresConfirmation')->willReturn($requiresConfirmation);
 
-        return new ImportLeadsFromFileTool($attachments, $leadModel, $config);
+        $fieldWriteGuard = $this->createMock(FieldWriteGuard::class);
+        $fieldWriteGuard->method('unknownAliases')->willReturn([]);
+        $fieldWriteGuard->method('prepareMany')->willReturnCallback(
+            static fn (array $rows): array => ['rows' => $rows, 'unknown' => []],
+        );
+
+        return new ImportLeadsFromFileTool($attachments, $leadModel, $config, $fieldWriteGuard);
     }
 }

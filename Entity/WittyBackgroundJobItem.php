@@ -22,6 +22,15 @@ use Mautic\CoreBundle\Doctrine\Mapping\ClassMetadataBuilder;
  * la meme raison : rien ne doit s'ecrire sur un contact sans validation
  * explicite, meme quand le declencheur (un cron) n'est lui-meme jamais
  * confirme par personne.
+ *
+ * `consumedAt` : distinct de `status`, qui decrit le resultat cote job
+ * SOURCE (recherche/enrichissement). `consumedAt` decrit si un job d'IMPORT
+ * (ImportContactsFromJobHandler/ImportCompaniesFromJobHandler) a deja
+ * transmis cet element a Mautic — necessaire car un meme job source peut
+ * faire l'objet de plusieurs imports successifs (ex. resume_bulk_job fait
+ * grossir le job source entre deux imports) : sans ce marquage, un import
+ * ulterieur relirait tout depuis le debut, doublons potentiels pour un
+ * rapprochement par email sans email disponible.
  */
 class WittyBackgroundJobItem
 {
@@ -41,6 +50,8 @@ class WittyBackgroundJobItem
     private ?array $data = null;
 
     private ?string $errorMessage = null;
+
+    private ?\DateTimeInterface $consumedAt = null;
 
     private \DateTimeInterface $dateAdded;
 
@@ -69,6 +80,7 @@ class WittyBackgroundJobItem
         $builder->addField('status', 'string');
         $builder->addNullableField('data', 'json');
         $builder->addNullableField('errorMessage', 'text', 'error_message');
+        $builder->addNullableField('consumedAt', 'datetime', 'consumed_at');
         $builder->addNamedField('dateAdded', 'datetime', 'date_added');
     }
 
@@ -139,6 +151,18 @@ class WittyBackgroundJobItem
     public function setErrorMessage(?string $errorMessage): self
     {
         $this->errorMessage = $errorMessage;
+
+        return $this;
+    }
+
+    public function getConsumedAt(): ?\DateTimeInterface
+    {
+        return $this->consumedAt;
+    }
+
+    public function setConsumedAt(?\DateTimeInterface $consumedAt): self
+    {
+        $this->consumedAt = $consumedAt;
 
         return $this;
     }

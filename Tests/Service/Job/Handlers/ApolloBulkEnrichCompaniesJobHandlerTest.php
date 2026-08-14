@@ -24,6 +24,15 @@ use ReflectionProperty;
  */
 class ApolloBulkEnrichCompaniesJobHandlerTest extends TestCase
 {
+    public function testDoesNotAllowMultiplePassesPerTick(): void
+    {
+        // Appelle Apollo (API externe) : ne doit jamais etre enchaine
+        // plusieurs fois dans le meme passage de cron (limite de debit).
+        $handler = new ApolloBulkEnrichCompaniesJobHandler($this->createMock(ApolloClient::class), $this->createMock(EntityManagerInterface::class));
+
+        $this->assertFalse($handler->allowsMultiplePassesPerTick());
+    }
+
     public function testIdentifiersAreDerivedFromExistingCompanyFields(): void
     {
         $company = $this->company(10, 'Acme Inc', 'https://acme.test');

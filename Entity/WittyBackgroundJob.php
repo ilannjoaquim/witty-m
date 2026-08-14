@@ -67,6 +67,8 @@ class WittyBackgroundJob
 
     private ?string $errorMessage = null;
 
+    private int $resumeCount = 0;
+
     private \DateTimeInterface $dateAdded;
 
     private ?\DateTimeInterface $dateStarted = null;
@@ -106,6 +108,7 @@ class WittyBackgroundJob
         $builder->addNamedField('succeededItems', 'integer', 'succeeded_items');
         $builder->addNamedField('failedItems', 'integer', 'failed_items');
         $builder->addNullableField('errorMessage', 'text', 'error_message');
+        $builder->addNamedField('resumeCount', 'integer', 'resume_count');
         $builder->addNamedField('dateAdded', 'datetime', 'date_added');
         $builder->addNamedField('dateStarted', 'datetime', 'date_started', true);
         $builder->addNamedField('dateCompleted', 'datetime', 'date_completed', true);
@@ -257,6 +260,18 @@ class WittyBackgroundJob
     public function setErrorMessage(?string $errorMessage): self
     {
         $this->errorMessage = $errorMessage;
+
+        return $this;
+    }
+
+    public function getResumeCount(): int
+    {
+        return $this->resumeCount;
+    }
+
+    public function setResumeCount(int $resumeCount): self
+    {
+        $this->resumeCount = $resumeCount;
 
         return $this;
     }

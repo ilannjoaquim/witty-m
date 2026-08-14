@@ -7,6 +7,7 @@ namespace MauticPlugin\WittyBundle\Service\Tool\Tools;
 use Mautic\LeadBundle\Entity\Lead;
 use Mautic\LeadBundle\Model\LeadModel;
 use Mautic\LeadBundle\Model\ListModel;
+use MauticPlugin\WittyBundle\Service\Field\FieldWriteGuard;
 use MauticPlugin\WittyBundle\Service\Tool\AbstractTool;
 use MauticPlugin\WittyBundle\Service\WittyConfig;
 
@@ -39,6 +40,7 @@ class BulkCreateContactsTool extends AbstractTool
         private LeadModel $leadModel,
         private ListModel $listModel,
         private WittyConfig $config,
+        private FieldWriteGuard $fieldWriteGuard,
     ) {
     }
 
@@ -51,11 +53,13 @@ class BulkCreateContactsTool extends AbstractTool
     {
         return 'Cree ou met a jour plusieurs contacts en un appel (plafonne a '.self::MAX_CONTACTS.'), et les '
             .'rattache optionnellement a un segment existant (segment_id, cree au prealable avec create_segment si '
-            .'besoin). contacts est un tableau d objets, chacun un alias de champ contact Mautic -> valeur (ex. '
-            .'email, firstname, lastname, company, position, linkedin_url, city, country, phone...) — comme '
-            .'create_contact/import_leads_from_file, mais email n est pas obligatoire ici (utile pour des prospects '
-            .'pas encore enrichis, ex. resultats de prospeo_search_person avant prospeo_enrich_person). Un contact '
-            .'avec le meme email est mis a jour, pas duplique ; sans email, toujours cree.';
+            .'besoin). contacts est un tableau d objets, chacun un alias de champ contact Mautic (PAS le nom du champ '
+            .'chez le fournisseur de donnees, ex. le champ Mautic est linkedin, pas linkedin_url — utilise list_fields '
+            .'en cas de doute) -> valeur (ex. email, firstname, lastname, company, position, linkedin, city, country, '
+            .'phone...) — comme create_contact/import_leads_from_file, mais email n est pas obligatoire ici (utile '
+            .'pour des prospects pas encore enrichis, ex. resultats de prospeo_search_person avant '
+            .'prospeo_enrich_person). Un contact avec le meme email est mis a jour, pas duplique ; sans email, '
+            .'toujours cree.';
     }
 
     public function isWriteOperation(): bool
@@ -112,6 +116,20 @@ class BulkCreateContactsTool extends AbstractTool
         if ([] === $valid) {
             return ['status' => 'error', 'error' => 'Aucun contact valide : chaque entree doit avoir au moins un champ non vide.'];
         }
+
+        $prepared = $this->fieldWriteGuard->prepareMany($valid, 'lead');
+
+        if ([] !== $prepared['unknown']) {
+            return [
+                'status' => 'error',
+                'error'  => sprintf(
+                    "Alias de champ inconnu : %s. Verifie l orthographe avec l outil list_fields (object: 'contact') avant de reessayer.",
+                    implode(', ', $prepared['unknown']),
+                ),
+            ];
+        }
+
+        $valid = $prepared['rows'];
 
         $segment = null;
 

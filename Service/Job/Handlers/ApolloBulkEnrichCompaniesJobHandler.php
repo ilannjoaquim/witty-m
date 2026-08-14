@@ -48,6 +48,13 @@ class ApolloBulkEnrichCompaniesJobHandler implements JobHandlerInterface
         return self::TYPE;
     }
 
+    public function allowsMultiplePassesPerTick(): bool
+    {
+        // Appelle Apollo (API externe) a chaque passage : rester a un lot
+        // par minute plutot que de risquer sa limite de debit.
+        return false;
+    }
+
     public function processChunk(WittyBackgroundJob $job): void
     {
         $params     = $job->getParams();

@@ -7,6 +7,7 @@ namespace MauticPlugin\WittyBundle\Controller;
 use Mautic\CoreBundle\Controller\CommonController;
 use MauticPlugin\WittyBundle\Entity\WittyRoom;
 use MauticPlugin\WittyBundle\Service\PlugNmeet\Exception\PlugNmeetException;
+use MauticPlugin\WittyBundle\Service\PlugNmeet\InvitationLinkSigner;
 use MauticPlugin\WittyBundle\Service\PlugNmeet\PlugNmeetClient;
 use MauticPlugin\WittyBundle\Service\PlugNmeet\RecordingToAssetConverter;
 use MauticPlugin\WittyBundle\Service\Taxonomy\TaxonomyOptionsProvider;
@@ -182,6 +183,29 @@ class VideoconferenceController extends CommonController
 
             return $data + ['join_url' => $client->buildJoinUrl((string) ($data['token'] ?? ''))];
         });
+    }
+
+    /**
+     * Lien "partageable" : contrairement a roomsLinkAction (nom choisi par
+     * l'admin, jeton plugNmeet reel mint immediatement, usage unique), ce lien
+     * enveloppe /meet/join/{token} (meme mecanisme que l'invitation par
+     * campagne, cf. InvitationLinkSigner) avec lead_id=null — le vrai jeton
+     * plugNmeet n'est mint qu'au moment ou un visiteur l'ouvre et saisit son
+     * propre nom (MeetJoinController::joinAnonymousAction). Un seul lien peut
+     * donc servir a plusieurs visiteurs, au prix de ne pouvoir suivre leur
+     * presence individuellement (pas de Lead a rattacher).
+     */
+    public function roomsShareableLinkAction(Request $request, InvitationLinkSigner $signer): JsonResponse
+    {
+        $roomId = trim((string) $request->request->get('room_id', ''));
+
+        if ('' === $roomId) {
+            return new JsonResponse(['status' => false, 'msg' => 'room_id est obligatoire.'], Response::HTTP_BAD_REQUEST);
+        }
+
+        $signed = $signer->sign(null, $roomId);
+
+        return new JsonResponse(['status' => true, 'url' => $signed['url']]);
     }
 
     // ---- Salles passees ----

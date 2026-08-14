@@ -23,6 +23,23 @@ interface JobHandlerInterface
     public function getType(): string;
 
     /**
+     * true UNIQUEMENT si ce handler n'appelle AUCUNE API externe a debit
+     * limite (Apollo/QuickEnrich/un serveur MCP) : dans ce cas,
+     * Command/ProcessBackgroundJobsCommand.php peut appeler processChunk()
+     * plusieurs fois de suite sur ce meme job, tant qu'il reste du budget de
+     * temps sur ce passage de cron, au lieu d'un seul lot. C'est ainsi que
+     * Mautic gere lui-meme un import CSV volumineux (LeadBundle\Model\ImportModel::process(),
+     * aucune coupure de temps, boucle jusqu'a la fin du fichier en un seul
+     * appel CLI) — sauf que la, c'est borne au budget commun du cron partage
+     * par tous les types de job, jamais un import qui monopolise
+     * indefiniment le creneau. Pour un handler qui appelle un fournisseur
+     * externe, renvoyer false : plusieurs passages rapproches dans le meme
+     * cron risqueraient de taper la limite de debit du fournisseur bien plus
+     * vite qu'un rythme d'un lot par minute.
+     */
+    public function allowsMultiplePassesPerTick(): bool;
+
+    /**
      * Traite UN lot borne (quelques dizaines d'elements maximum, une poignee
      * d'appels API) a partir de l'etat courant du job (getParams() figes a la
      * creation, getCursor() qui avance a chaque appel) :

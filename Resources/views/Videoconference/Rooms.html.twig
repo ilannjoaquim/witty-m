@@ -55,6 +55,7 @@
      data-end-endpoint="{{ path('witty_video_rooms_end') }}"
      data-details-endpoint="{{ path('witty_video_rooms_details') }}"
      data-link-endpoint="{{ path('witty_video_rooms_link') }}"
+     data-shareable-endpoint="{{ path('witty_video_rooms_shareable_link') }}"
      data-category-new-url="{{ path('mautic_category_action', { bundle: 'witty_room', objectAction: 'new', inForm: 1 }) }}">
 
     {% if not isConfigured %}
@@ -391,6 +392,13 @@
                     '<button class="btn btn-secondary btn-nospin" size="sm" id="witty-gen-presenter" type="button">{{ 'mautic.witty.video.rooms.gen_presenter'|trans|e('js') }}</button>' +
                 '</div>' +
                 '<div id="witty-link-result"></div>' +
+                '<hr>' +
+                '<div class="form-group">' +
+                    '<label>{{ 'mautic.witty.video.rooms.shareable_link'|trans|e('js') }}</label>' +
+                    '<p class="text-muted" style="font-size:12px;">{{ 'mautic.witty.video.rooms.shareable_hint'|trans|e('js') }}</p>' +
+                    '<button class="btn btn-secondary btn-nospin" size="sm" id="witty-gen-shareable" type="button">{{ 'mautic.witty.video.rooms.gen_shareable'|trans|e('js') }}</button>' +
+                '</div>' +
+                '<div id="witty-shareable-result"></div>' +
             '</div>' +
             '<div class="witty-video-modal-footer">' +
                 '<button class="btn btn-secondary" id="witty-links-close" type="button"><i class="ri-close-line"></i> <span>{{ 'mautic.witty.video.close'|trans|e('js') }}</span></button>' +
@@ -419,6 +427,21 @@
 
         document.getElementById('witty-gen-listener').addEventListener('click', function () { generate(false); });
         document.getElementById('witty-gen-presenter').addEventListener('click', function () { generate(true); });
+
+        document.getElementById('witty-gen-shareable').addEventListener('click', function () {
+            fetch(app.dataset.shareableEndpoint, {
+                method: 'POST',
+                headers: headersForm(),
+                body: toForm({ room_id: roomId })
+            })
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                    if (!data.status) { window.alert(data.msg || 'Error'); return; }
+                    var result = document.getElementById('witty-shareable-result');
+                    result.innerHTML = '<div class="witty-video-link-block"><div class="url"><a href="' +
+                        escapeHtml(data.url) + '" target="_blank">' + escapeHtml(data.url) + '</a></div></div>';
+                });
+        });
     }
 
     function endRoom(roomId) {
