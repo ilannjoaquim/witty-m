@@ -52,8 +52,8 @@ use MauticPlugin\WittyBundle\Service\Job\JobItemFilter;
  * - job de RECHERCHE (Prospeo/QuickEnrich/MCP) : les resultats sont des
  *   profils externes, pas encore des contacts Mautic -> dedoublonnage par
  *   email, creation si aucun match (ContactImporter::importOne()).
- * - job d ENRICHISSEMENT sur un segment existant
- *   (ApolloBulkEnrichPeopleJobHandler::TYPE) : `external_ref` porte deja
+ * - job d ENRICHISSEMENT sur un segment existant (ApolloBulkEnrichPeopleJobHandler::TYPE,
+ *   QuickenrichBulkEnrichPeopleJobHandler::TYPE) : `external_ref` porte deja
  *   l id exact du contact Mautic concerne -> mise a jour PAR ID, jamais de
  *   recherche par email ni de creation (ContactImporter::updateById()) — un
  *   enrichissement met a jour un contact qui existe deja, par definition.
@@ -65,7 +65,10 @@ class ImportContactsFromJobHandler implements JobHandlerInterface
     private const BATCH_SIZE = 50;
 
     /** Types de job source dont external_ref est un id de contact Mautic, pas un profil externe. */
-    private const CONTACT_ID_MATCHED_SOURCE_TYPES = [ApolloBulkEnrichPeopleJobHandler::TYPE];
+    private const CONTACT_ID_MATCHED_SOURCE_TYPES = [
+        ApolloBulkEnrichPeopleJobHandler::TYPE,
+        QuickenrichBulkEnrichPeopleJobHandler::TYPE,
+    ];
 
     public function __construct(
         private ContactImporter $importer,

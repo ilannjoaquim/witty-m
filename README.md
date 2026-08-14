@@ -430,8 +430,48 @@ explicitement en plus du nom.
   clair immédiat plutôt qu'un aller-retour réseau pour rien). Les dimensions à `include`/`exclude`
   tous deux vides ne sont jamais envoyées, pour ne pas compter par erreur comme un filtre actif côté
   API.
-- **Limite de débit** — 120 requêtes/minute par clé API, seulement rappelée dans la description de
-  l'outil (pas de limitation technique côté plugin, comme pour le coût en crédits Apollo).
+- **Limite de débit** — 120 requêtes/minute par clé API pour Contact Finder (recherche), 1000/minute
+  pour Search/phone/email (révélation), communiquées par l'utilisateur — seulement rappelées dans les
+  descriptions d'outils, pas de limitation technique côté plugin, comme pour le coût en crédits Apollo.
+
+#### Révélation en masse (`start_quickenrich_bulk_enrich_people`)
+
+Limite signalée par l'agent lui-même en session : `quickenrich_find_employee_email`/
+`quickenrich_find_employee_phone` n'existaient qu'en appel unitaire, sans équivalent en masse
+(contrairement à la recherche, déjà couverte par `start_quickenrich_bulk_search`) — inutilisable pour
+révéler l'email/téléphone de plusieurs milliers de contacts déjà importés dans Mautic.
+
+- **`Service/Job/Handlers/QuickenrichBulkEnrichPeopleJobHandler.php`** (`quickenrich_bulk_enrich_people`)
+  — parcourt tous les membres d'un **segment Mautic** (même requête `lead_lists_leads` par `lead_id`
+  croissant, même exclusion `manually_removed=1`, que `ApolloBulkEnrichPeopleJobHandler`), 40 par lot.
+  `reveal` (`email`/`phone`/les deux) choisit quel(s) endpoint(s) appeler par contact — contrairement à
+  Apollo `bulk_match`, QuickEnrich n'a pas d'appel groupé : ce sont un ou deux vrais appels HTTP
+  **par contact**, jamais un seul appel pour tout le lot. `allowsMultiplePassesPerTick()=false` comme
+  les trois autres handlers qui touchent un fournisseur externe (cf. section multi-passage plus haut).
+- **Identifiant obligatoire : un lien LinkedIn déjà présent sur le contact** (champ Mautic `linkedin`)
+  — le seul exploitable en masse sans requêter une `Company` par contact pour le repli
+  `company_url`+`first_name`+`last_name` des outils unitaires, volontairement pas repris ici. Un
+  contact sans LinkedIn est écarté proprement (`status=skipped`), jamais une erreur bloquante pour le
+  reste du lot. Workflow typique en amont : `start_quickenrich_bulk_search` puis
+  `start_contacts_import_from_job` (avec `linkedin` dans le mapping) pour peupler ce champ avant de
+  lancer l'enrichissement.
+- **`linkedin` n'est PAS un champ Doctrine mappé sur `Lead`** (seuls `title`/`firstname`/`lastname`/
+  `company`/`position`/`email`/`phone`/`mobile`/`address1`/`address2`/`city`/`state`/`zipcode`/
+  `timezone`/`country` le sont, cf. `Lead::loadMetadata()`) — impossible de le lire par une simple
+  requête DQL comme pour ces champs-là, alors que c'est pourtant une vraie colonne de la table `leads`
+  (vérifié dans cette session lors du diagnostic du bug de mapping LinkedIn, cf. plus haut). Lu en SQL
+  natif, en lot (`WHERE id IN (...)`), plutôt que d'hydrater chaque `Lead` en entier
+  (`LeadModel::getEntity()`, tous les groupes de champs) juste pour cette seule valeur — nom de table
+  obtenu via les métadonnées Doctrine (`EntityManager::getClassMetadata(Lead::class)->getTableName()`)
+  plutôt qu'une constante de préfixe supposée définie, jamais désynchronisé du mapping réel.
+  **Vérifié contre une vraie base MySQL locale** (pas seulement des doublures) — requête exécutée pour
+  de vrai contre un segment réel avec un membre porteur d'un lien LinkedIn et un membre sans, les deux
+  correctement distingués (révélé pour l'un, écarté pour l'autre), données de test nettoyées ensuite.
+- **`start_quickenrich_bulk_enrich_people`** — mêmes garde-fous que les autres `start_*bulk*`
+  (segment introuvable/vide rejeté avant toute création de job). `QuickenrichBulkEnrichPeopleJobHandler::TYPE`
+  ajouté à `ImportContactsFromJobHandler::CONTACT_ID_MATCHED_SOURCE_TYPES` : `start_contacts_import_from_job`
+  détecte donc automatiquement, comme pour Apollo, qu'un job source issu de cet enrichissement doit
+  être appliqué par **id de contact**, jamais par dédoublonnage email — rien à préciser à l'agent.
 
 ### Données publiques (data.gouv.fr, MCP)
 
@@ -1029,6 +1069,7 @@ outils.
 | `start_apollo_bulk_enrich_people` | | Lance en arrière-plan un enrichissement Apollo sur tous les contacts d'un segment |
 | `start_apollo_bulk_enrich_companies` | | Lance en arrière-plan un enrichissement Apollo sur une liste d'entreprises Mautic existantes |
 | `start_quickenrich_bulk_search` | | Lance en arrière-plan une recherche QuickEnrich paginée jusqu'à `target_count` résultats |
+| `start_quickenrich_bulk_enrich_people` | | Révèle email/téléphone QuickEnrich sur tout un segment Mautic (contacts avec un lien LinkedIn) |
 | `start_bulk_mcp_search` | | Lance en arrière-plan la pagination d'un outil MCP (Prospeo, data.gouv.fr) |
 | `check_bulk_job` | | Consulte la progression d'un job de fond |
 | `resume_bulk_job` | | Relance un job de fond `failed` exactement où il s'est arrêté (curseur intact), plafonné à 5 tentatives |

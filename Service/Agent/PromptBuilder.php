@@ -209,7 +209,12 @@ class PromptBuilder
             .'facturent un credit (phone : seulement si trouve), contrairement a la recherche qui reste gratuite, '
             .'donc ne les appelle que pour un contact reellement retenu, jamais en boucle sur toute une liste par '
             .'defaut. Comme pour Prospeo/Apollo, transforme toi-meme un contact retenu en contact Mautic via '
-            .'bulk_create_contacts (segment_id optionnel, cree au prealable avec create_segment si besoin).';
+            .'bulk_create_contacts (segment_id optionnel, cree au prealable avec create_segment si besoin). '
+            .'Pour reveler email/telephone sur TOUT un segment Mautic deja constitue (des milliers de contacts, hors '
+            .'de portee de quickenrich_find_employee_email/phone en appel unitaire), utilise '
+            .'start_quickenrich_bulk_enrich_people plutot que de boucler toi-meme — necessite que chaque contact ait '
+            .'deja un lien LinkedIn (champ linkedin), typiquement pose par un import precedent depuis '
+            .'start_quickenrich_bulk_search. Meme registre que les autres start_*bulk* (cf. note dediee).';
     }
 
     /**
@@ -249,8 +254,10 @@ class PromptBuilder
             .'synchrone : start_apollo_bulk_enrich_people (tout un segment Mautic), start_apollo_bulk_enrich_companies '
             .'(une liste d entreprises Mautic existantes — company_ids, recupere-les via search_companies au '
             .'prealable, Mautic n a pas de notion de segment d entreprises), start_quickenrich_bulk_search (pagine '
-            .'jusqu a target_count), start_bulk_mcp_search (pagine un outil prospeo_*/datagouv_* — fournis '
-            .'tool_name/page_argument/items_field exacts d apres le schema reel de l outil vise, ne devine jamais). '
+            .'jusqu a target_count), start_quickenrich_bulk_enrich_people (revele email/telephone sur tout un segment '
+            .'Mautic, necessite un lien LinkedIn deja present sur chaque contact), start_bulk_mcp_search (pagine un '
+            .'outil prospeo_*/datagouv_* — fournis tool_name/page_argument/items_field exacts d apres le schema reel '
+            .'de l outil vise, ne devine jamais). '
             .'Ces outils ne renvoient JAMAIS de resultat directement, seulement un job_id : le job tourne en '
             .'arriere-plan (quelques minutes a plusieurs heures selon le volume, un lot traite a chaque passage de '
             .'cron), previens l utilisateur que ca prendra du temps plutot que d attendre une reponse immediate. '
@@ -266,8 +273,9 @@ class PromptBuilder
             .'les resultats directement en base, sans jamais te les faire recopier. Regarde d abord un echantillon '
             .'via list_bulk_job_items pour ecrire un mapping/des filtres corrects (jamais devines). Cas particulier '
             .'automatique : si source_job_id vient d un enrichissement sur des contacts DEJA Mautic (ex. '
-            .'start_apollo_bulk_enrich_people), start_contacts_import_from_job met a jour le contact concerne PAR '
-            .'ID, ne cree jamais de doublon — rien a preciser, c est detecte tout seul depuis le type du job source. '
+            .'start_apollo_bulk_enrich_people, start_quickenrich_bulk_enrich_people), start_contacts_import_from_job '
+            .'met a jour le contact concerne PAR ID, ne cree jamais de doublon — rien a preciser, c est detecte tout '
+            .'seul depuis le type du job source. '
             .'Meme logique cote entreprises avec start_companies_import_from_job (toujours une mise a jour, jamais '
             .'une creation, une entreprise n a pas d identifiant fiable equivalent a l email d un contact). '
             .'Un job source status=failed (ex. erreur 500/timeout du fournisseur en cours de pagination) N EST '
