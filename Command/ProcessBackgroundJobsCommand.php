@@ -50,6 +50,21 @@ use Symfony\Component\Console\Output\OutputInterface;
  * import a la fois, jamais partage avec d'autres types de taches. Le
  * multi-passage reprend ce meme principe (avancer tant qu'il y a du travail)
  * mais borne au budget commun du cron partage par tous les types de job.
+ *
+ * Consequence du multi-passage sur le risque de chevauchement (constate en
+ * production : "EntityManagerClosed") : un passage peut desormais rester en
+ * vie jusqu'a MAX_RUNTIME_SECONDS au lieu de quasi instantane, ce qui rend
+ * un chevauchement de deux passages de cron (sans "prevent overlapping" cote
+ * ordonnanceur) bien plus probable qu'avant — et un deadlock MySQL entre les
+ * deux (deux processus qui touchent la meme ligne WittyBackgroundJob) ferme
+ * l'EntityManager cote Doctrine, rendant tout persist()/flush() ulterieur
+ * dans CE processus impossible. persistAndFlush() detecte ce cas
+ * explicitement (isOpen() + try/catch) et arrete proprement ce passage
+ * plutot que de laisser une exception non rattrapee planter toute la
+ * commande (et perdre le suivi des jobs restants avec) — mais ne supprime
+ * pas le risque de depart : `flock -n /tmp/witty-jobs-process.lock php
+ * bin/console witty:jobs:process` dans la ligne de cron (ou l'option
+ * equivalente de l'ordonnanceur) reste la vraie protection.
  */
 #[AsCommand(name: 'witty:jobs:process', description: 'Fait avancer les jobs de fond (enrichissement/recherche a volume) en attente.')]
 class ProcessBackgroundJobsCommand extends Command
@@ -97,9 +112,24 @@ class ProcessBackgroundJobsCommand extends Command
             $passes    = 0;
 
             do {
-                $this->tick($job, $output);
+                $ok = $this->tick($job, $output);
                 ++$ticked;
                 ++$passes;
+
+                if (!$ok) {
+                    // L'EntityManager est ferme (Doctrine se ferme lui-meme
+                    // suite a une erreur irrecuperable — deadlock, contrainte
+                    // violee, connexion perdue... constate en production avec
+                    // "EntityManagerClosed") : plus AUCUNE operation Doctrine
+                    // ne peut aboutir dans ce processus, continuer ne ferait
+                    // que repeter la meme erreur sur chaque job restant.
+                    // On s'arrete net ; le prochain passage de cron reprend
+                    // dans un processus neuf (EntityManager frais) depuis le
+                    // dernier etat connu en base de chaque job.
+                    $output->writeln('EntityManager ferme suite a une erreur Doctrine irrecuperable, arret de ce passage de cron.');
+
+                    return Command::FAILURE;
+                }
             } while (
                 $multiPass
                 && $passes < self::MAX_PASSES_PER_JOB
@@ -116,7 +146,13 @@ class ProcessBackgroundJobsCommand extends Command
         return in_array($job->getStatus(), [WittyBackgroundJob::STATUS_QUEUED, WittyBackgroundJob::STATUS_RUNNING], true);
     }
 
-    private function tick(WittyBackgroundJob $job, OutputInterface $output): void
+    /**
+     * @return bool false si l'EntityManager vient de se fermer (Doctrine se
+     *              ferme lui-meme suite a une erreur irrecuperable) — dans ce
+     *              cas, l'appelant doit arreter tout le passage de cron plutot
+     *              que d'enchainer d'autres tick() voues au meme echec.
+     */
+    private function tick(WittyBackgroundJob $job, OutputInterface $output): bool
     {
         $handler = $this->handlers->get($job->getType());
 
@@ -128,12 +164,14 @@ class ProcessBackgroundJobsCommand extends Command
             $job->setStatus(WittyBackgroundJob::STATUS_FAILED)
                 ->setErrorMessage(sprintf('Type de job inconnu : %s', $job->getType()))
                 ->setLastTickAt(new \DateTimeImmutable());
-            $this->em->persist($job);
-            $this->em->flush();
+
+            if (!$this->persistAndFlush($job)) {
+                return false;
+            }
 
             $output->writeln(sprintf('Job #%d (%s) : type de handler introuvable.', $job->getId(), $job->getType()));
 
-            return;
+            return true;
         }
 
         if (WittyBackgroundJob::STATUS_QUEUED === $job->getStatus()) {
@@ -157,8 +195,9 @@ class ProcessBackgroundJobsCommand extends Command
             $job->setDateCompleted(new \DateTimeImmutable());
         }
 
-        $this->em->persist($job);
-        $this->em->flush();
+        if (!$this->persistAndFlush($job)) {
+            return false;
+        }
 
         $output->writeln(sprintf(
             'Job #%d (%s) : %s — %d/%s traites (%d ok, %d echecs).',
@@ -170,5 +209,43 @@ class ProcessBackgroundJobsCommand extends Command
             $job->getSucceededItems(),
             $job->getFailedItems(),
         ));
+
+        return true;
+    }
+
+    /**
+     * Constate en production ("EntityManagerClosed") : ce persist()/flush()
+     * final n'etait jusque-la protege par AUCUN try/catch, ni celui autour de
+     * processChunk() (deja termine a ce stade), ni un autre dans execute()
+     * (qui appelait tick() sans le proteger non plus) — une erreur Doctrine
+     * ici (deadlock entre deux passages de cron qui se chevauchent, connexion
+     * perdue...) remontait donc telle quelle et faisait planter TOUTE la
+     * commande avec une trace brute, perdant le suivi des jobs restants.
+     * isOpen() est verifie explicitement en plus du try/catch : Doctrine peut
+     * fermer l'EntityManager sans que l'exception d'origine soit celle qui
+     * remonte jusqu'ici (ex. fermee par une operation anterieure dans
+     * processChunk() qui a elle-meme ete avalee par son propre try/catch).
+     */
+    private function persistAndFlush(WittyBackgroundJob $job): bool
+    {
+        if (!$this->em->isOpen()) {
+            $this->logger->critical('Witty : EntityManager deja ferme avant de sauvegarder l etat du job.', ['job_id' => $job->getId()]);
+
+            return false;
+        }
+
+        try {
+            $this->em->persist($job);
+            $this->em->flush();
+        } catch (\Throwable $e) {
+            $this->logger->critical('Witty : echec de sauvegarde de l etat du job (EntityManager probablement ferme).', [
+                'job_id'    => $job->getId(),
+                'exception' => $e,
+            ]);
+
+            return false;
+        }
+
+        return true;
     }
 }

@@ -12,6 +12,7 @@ use MauticPlugin\WittyBundle\Service\Job\JobHandlerInterface;
 use MauticPlugin\WittyBundle\Service\Job\JobHandlerRegistry;
 use Psr\Log\LoggerInterface;
 use PHPUnit\Framework\TestCase;
+use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Tester\CommandTester;
 
 /**
@@ -113,6 +114,74 @@ class ProcessBackgroundJobsCommandTest extends TestCase
         $this->assertSame(0, $handler->callsFor($otherJob));
     }
 
+    /**
+     * Bug reel constate en production ("EntityManagerClosed") : le
+     * persist()/flush() final de tick() n'etait protege par AUCUN try/catch,
+     * ni celui autour de processChunk() (deja termine a ce stade), ni un
+     * autre dans execute() — une erreur Doctrine qui ferme l'EntityManager
+     * (deadlock entre deux passages de cron qui se chevauchent, plus probable
+     * depuis le multi-passage qui allonge la duree de vie d'un passage)
+     * remontait donc telle quelle et plantait TOUTE la commande. Ce test
+     * verifie que ce n'est plus le cas : la commande se termine proprement
+     * (Command::FAILURE, jamais une exception non rattrapee qui remonterait
+     * jusqu'ici).
+     */
+    public function testEntityManagerClosedStopsTheRunGracefullyInsteadOfCrashing(): void
+    {
+        $job     = $this->job('import_contacts_from_job', 'A');
+        $handler = new RecordingJobHandler('import_contacts_from_job', true, completeAfterCallsPerJob: 999);
+
+        $repository = $this->createMock(WittyBackgroundJobRepository::class);
+        $repository->method('findRunnable')->willReturn([$job]);
+
+        $em = $this->createMock(EntityManagerInterface::class);
+        // Deja ferme AVANT meme le premier persist()/flush() de tick() :
+        // simule une fermeture survenue plus tot dans le meme processus
+        // (ex. un job precedent dans la meme boucle multi-passages).
+        $em->method('isOpen')->willReturn(false);
+
+        $command = new ProcessBackgroundJobsCommand(
+            new JobHandlerRegistry([$handler]),
+            $repository,
+            $em,
+            $this->createMock(LoggerInterface::class),
+        );
+
+        $tester = new CommandTester($command);
+        $tester->execute([]);
+
+        $this->assertSame(Command::FAILURE, $tester->getStatusCode());
+        // Un seul tick tente : la boucle s'est bien arretee au premier signal
+        // d'EntityManager ferme, pas apres avoir enchaine d'autres passages
+        // voues au meme echec.
+        $this->assertSame(1, $handler->callsFor($job));
+    }
+
+    public function testFlushExceptionStopsTheRunGracefullyInsteadOfCrashing(): void
+    {
+        $job     = $this->job('import_contacts_from_job', 'A');
+        $handler = new RecordingJobHandler('import_contacts_from_job', true, completeAfterCallsPerJob: 999);
+
+        $repository = $this->createMock(WittyBackgroundJobRepository::class);
+        $repository->method('findRunnable')->willReturn([$job]);
+
+        $em = $this->createMock(EntityManagerInterface::class);
+        $em->method('isOpen')->willReturn(true);
+        $em->method('flush')->willThrowException(new \RuntimeException('The EntityManager is closed.'));
+
+        $command = new ProcessBackgroundJobsCommand(
+            new JobHandlerRegistry([$handler]),
+            $repository,
+            $em,
+            $this->createMock(LoggerInterface::class),
+        );
+
+        $tester = new CommandTester($command);
+        $tester->execute([]);
+
+        $this->assertSame(Command::FAILURE, $tester->getStatusCode());
+    }
+
     private function job(string $type, string $label): WittyBackgroundJob
     {
         return (new WittyBackgroundJob())->setType($type)->setLabel($label)->setStatus(WittyBackgroundJob::STATUS_QUEUED);
@@ -127,10 +196,17 @@ class ProcessBackgroundJobsCommandTest extends TestCase
         $repository = $this->createMock(WittyBackgroundJobRepository::class);
         $repository->method('findRunnable')->willReturn($jobs);
 
+        // isOpen() sans stub renverrait null (falsy) : persistAndFlush()
+        // traiterait alors chaque tick() comme un EntityManager deja ferme,
+        // arretant tout le passage des le premier job — jamais le cas dans
+        // ces tests, ou l'on verifie la boucle multi-passages elle-meme.
+        $em = $this->createMock(EntityManagerInterface::class);
+        $em->method('isOpen')->willReturn(true);
+
         $command = new ProcessBackgroundJobsCommand(
             new JobHandlerRegistry($handlers),
             $repository,
-            $this->createMock(EntityManagerInterface::class),
+            $em,
             $this->createMock(LoggerInterface::class),
             $maxRuntimeSeconds,
         );

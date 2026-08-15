@@ -23,6 +23,13 @@
 <style>
     #witty-app { display: flex; gap: 16px; height: calc(100vh - 200px); min-height: 460px; }
     #witty-sidebar { width: 240px; flex: 0 0 240px; display: flex; flex-direction: column; }
+    /* Bouton "menu" repliant la liste des conversations : invisible en
+       desktop (le panneau reste toujours visible dans le flux normal),
+       affiche uniquement sous le seuil mobile ci-dessous. */
+    #witty-sidebar-toggle { display: none; align-items: center; justify-content: center; width: 36px; height: 36px; flex: 0 0 36px; border: 1px solid #dfe3ea; border-radius: 4px; background: #fff; cursor: pointer; margin-bottom: 10px; }
+    #witty-sidebar-toggle:hover { background: #f6f8fb; }
+    #witty-sidebar-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 1039; }
+    #witty-sidebar-overlay.open { display: block; }
     #witty-conversations { flex: 1; overflow-y: auto; border: 1px solid #e0e0e0; border-radius: 4px; background: #fff; }
     .witty-conv { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-bottom: 1px solid #f0f0f0; cursor: pointer; font-size: 13px; }
     .witty-conv:hover { background: #f6f8fb; }
@@ -87,6 +94,36 @@
     #witty-model { min-width: 190px; }
     .witty-cursor::after { content: '▍'; animation: witty-blink 1s step-start infinite; }
     @keyframes witty-blink { 50% { opacity: 0; } }
+
+    /* Mobile : le chat est prevu pour y etre utilise en priorite (~90% des
+       usages, dixit l'utilisateur). La liste des conversations en colonne
+       fixe de 240px y devorerait la majorite d'un ecran de telephone — elle
+       devient donc un panneau "menu burger" (masque hors ecran par defaut,
+       ouvert/ferme via #witty-sidebar-toggle) plutot qu'une colonne toujours
+       visible, et le chat lui-meme passe en pleine largeur. */
+    @media (max-width: 768px) {
+        #witty-sidebar-toggle { display: inline-flex; }
+        #witty-sidebar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            bottom: 0;
+            width: 85%;
+            max-width: 320px;
+            z-index: 1040;
+            background: #fff;
+            padding: 16px;
+            box-shadow: 2px 0 16px rgba(0,0,0,.18);
+            overflow-y: auto;
+            transform: translateX(-100%);
+            transition: transform .25s ease;
+        }
+        #witty-sidebar.open { transform: translateX(0); }
+        /* Seul #witty-main reste dans le flux normal une fois #witty-sidebar
+           sorti du flux (position: fixed) : il prend donc naturellement toute
+           la largeur disponible via son flex: 1 existant, sans changement. */
+        .witty-msg { max-width: 90%; }
+    }
 </style>
 
 <div id="witty-app"
@@ -102,6 +139,11 @@
      data-configured="{{ isConfigured ? '1' : '0' }}"
      data-default-provider="{{ defaultProvider }}"
      data-providers="{{ providers|json_encode }}">
+
+    <button type="button" id="witty-sidebar-toggle" aria-label="{{ 'mautic.witty.chat.toggle_sidebar'|trans }}" aria-expanded="false" aria-controls="witty-sidebar">
+        <i class="ri-menu-line" aria-hidden="true"></i>
+    </button>
+    <div id="witty-sidebar-overlay"></div>
 
     <div id="witty-sidebar">
         <div id="witty-search-wrap" class="mb-10">
@@ -183,6 +225,9 @@
     var fileInput       = document.getElementById('witty-file-input');
     var attachBtn       = document.getElementById('witty-attach');
     var pendingWrap     = document.getElementById('witty-pending-attachments');
+    var sidebar         = document.getElementById('witty-sidebar');
+    var sidebarToggle   = document.getElementById('witty-sidebar-toggle');
+    var sidebarOverlay  = document.getElementById('witty-sidebar-overlay');
 
     // Pieces jointes selectionnees pour le prochain message, chacune uploadee
     // des la selection (pas au moment d'Envoyer) : le fichier doit deja avoir
@@ -564,11 +609,38 @@
         usageEl.textContent  = quota > 0 ? (used + ' / ' + quota + ' tokens') : (used + ' tokens');
     }
 
+    // Panneau "menu burger" mobile (cf. media query dediee) : sans effet en
+    // desktop, ou #witty-sidebar reste toujours visible dans le flux normal
+    // quelle que soit la classe .open (portee entierement a la media query).
+    function openSidebar() {
+        sidebar.classList.add('open');
+        sidebarOverlay.classList.add('open');
+        sidebarToggle.setAttribute('aria-expanded', 'true');
+    }
+
+    function closeSidebar() {
+        sidebar.classList.remove('open');
+        sidebarOverlay.classList.remove('open');
+        sidebarToggle.setAttribute('aria-expanded', 'false');
+    }
+
+    sidebarToggle.addEventListener('click', function () {
+        if (sidebar.classList.contains('open')) { closeSidebar(); } else { openSidebar(); }
+    });
+    sidebarOverlay.addEventListener('click', closeSidebar);
+    document.addEventListener('keydown', function (event) {
+        if (event.key === 'Escape') { closeSidebar(); }
+    });
+
     function markActive(id) {
         conversationId = id || null;
         Array.prototype.forEach.call(list.querySelectorAll('.witty-conv'), function (el) {
             el.classList.toggle('active', String(el.dataset.id) === String(id));
         });
+        // Choisir une conversation (ou en demarrer une nouvelle, cf. plus bas)
+        // doit refermer le panneau sur mobile : l'utilisateur veut voir le
+        // chat qu'il vient de choisir, pas garder le menu ouvert par-dessus.
+        closeSidebar();
     }
 
     function refreshConversations(activeId) {

@@ -626,6 +626,28 @@ une classe taguée = une capacité de plus, rien à câbler ailleurs.
   aucun appel API externe, uniquement des écritures Mautic) : les quatre autres handlers (Apollo/
   QuickEnrich/MCP) renvoient `false` et restent à un lot par minute, pour ne jamais risquer la limite
   de débit d'un fournisseur externe en les appelant en rafale dans un même passage.
+- **Bug de production réel causé par le multi-passage, corrigé en session** — `EntityManagerClosed`
+  remonté par `witty:jobs:process` en environnement réel, plantant toute la commande. Cause : le
+  `persist()`/`flush()` final de `tick()` n'était protégé par **aucun** try/catch (ni celui autour de
+  `processChunk()`, déjà terminé à ce stade côté handler, ni un autre dans `execute()`, qui appelait
+  `tick()` sans le protéger non plus) — une erreur Doctrine qui ferme l'EntityManager (deadlock MySQL
+  entre deux passages de cron qui se chevauchent, connexion perdue...) remontait donc telle quelle et
+  plantait toute la commande avec une trace brute, perdant le suivi de tous les jobs restants avec.
+  Le multi-passage a **concrètement aggravé le risque** : un passage peut désormais rester en vie
+  jusqu'à 50 s au lieu de quasi instantané, rendant un chevauchement de deux passages de cron (sans
+  "prevent overlapping" côté ordonnanceur) bien plus probable qu'avant. Corrigé par
+  `ProcessBackgroundJobsCommand::persistAndFlush()` : vérifie `EntityManagerInterface::isOpen()`
+  explicitement (Doctrine peut fermer l'EntityManager sans que l'exception d'origine soit celle qui
+  remonte jusqu'ici, ex. fermée par une opération antérieure dans `processChunk()` déjà avalée par son
+  propre try/catch) **et** entoure le `persist()`/`flush()` d'un try/catch — dans les deux cas,
+  `tick()` renvoie `false`, `execute()` arrête net toute la boucle (interne ET externe) et renvoie
+  `Command::FAILURE` proprement plutôt que de laisser une exception non rattrapée se propager.
+  N'élimine pas le risque de départ (deux passages qui se chevauchent restent possibles) : `flock -n
+  /tmp/witty-jobs-process.lock php bin/console witty:jobs:process` dans la ligne de cron (ou l'option
+  équivalente de l'ordonnanceur) reste la vraie protection, déjà recommandée plus haut. **Vérifié
+  contre un scénario réel** (pas seulement raisonné) : `isOpen()=false` et `flush()` qui lève une
+  exception simulent chacun le bug de production, les deux confirmés gérés sans plantage
+  (`Command::FAILURE`, boucle arrêtée après un seul tick).
 - **`start_apollo_bulk_enrich_people`/`start_quickenrich_bulk_search`/`start_bulk_mcp_search`** — un
   outil de déclenchement par intégration (schéma typé, propre à chacune) plutôt qu'un unique outil
   générique à paramètres libres : plus fiable pour un modèle de tool-calling qu'un `params: object`
