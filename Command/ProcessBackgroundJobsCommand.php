@@ -165,7 +165,7 @@ class ProcessBackgroundJobsCommand extends Command
                 ->setErrorMessage(sprintf('Type de job inconnu : %s', $job->getType()))
                 ->setLastTickAt(new \DateTimeImmutable());
 
-            if (!$this->persistAndFlush($job)) {
+            if (!$this->persistAndFlush($job, $output)) {
                 return false;
             }
 
@@ -187,6 +187,12 @@ class ProcessBackgroundJobsCommand extends Command
                 'type'      => $job->getType(),
                 'exception' => $e,
             ]);
+            // Ecrit AUSSI sur la sortie du cron (pas seulement dans le log
+            // Mautic, qui demande d'aller chercher dans un fichier a part) :
+            // question posee en session, l'exception exacte doit etre visible
+            // directement dans les logs du conteneur, la ou l'utilisateur
+            // regarde en premier.
+            $output->writeln(sprintf('Job #%d (%s) : ECHEC — %s: %s', $job->getId(), $job->getType(), get_class($e), $e->getMessage()));
         }
 
         $job->setLastTickAt(new \DateTimeImmutable());
@@ -195,7 +201,7 @@ class ProcessBackgroundJobsCommand extends Command
             $job->setDateCompleted(new \DateTimeImmutable());
         }
 
-        if (!$this->persistAndFlush($job)) {
+        if (!$this->persistAndFlush($job, $output)) {
             return false;
         }
 
@@ -225,10 +231,23 @@ class ProcessBackgroundJobsCommand extends Command
      * fermer l'EntityManager sans que l'exception d'origine soit celle qui
      * remonte jusqu'ici (ex. fermee par une operation anterieure dans
      * processChunk() qui a elle-meme ete avalee par son propre try/catch).
+     *
+     * L'exception (quand il y en a une a ce stade precis) est ecrite sur la
+     * sortie du cron, pas seulement loguee cote Mautic : question posee en
+     * session, l'exception exacte doit etre visible directement dans les
+     * logs du conteneur sans avoir a aller chercher un autre fichier.
      */
-    private function persistAndFlush(WittyBackgroundJob $job): bool
+    private function persistAndFlush(WittyBackgroundJob $job, OutputInterface $output): bool
     {
         if (!$this->em->isOpen()) {
+            // Ferme par une operation anterieure dans ce meme passage (cf.
+            // docblock) : $job->getErrorMessage() porte alors deja la trace
+            // de la premiere exception, la seule piste disponible ici.
+            $output->writeln(sprintf(
+                'Job #%d : EntityManager deja ferme avant la sauvegarde.%s',
+                $job->getId(),
+                $job->getErrorMessage() ? ' Derniere erreur connue sur ce job : '.$job->getErrorMessage() : ' Cause non identifiee dans ce tick — verifier var/logs/mautic_prod-*.log pour l exception Doctrine d origine.',
+            ));
             $this->logger->critical('Witty : EntityManager deja ferme avant de sauvegarder l etat du job.', ['job_id' => $job->getId()]);
 
             return false;
@@ -238,6 +257,7 @@ class ProcessBackgroundJobsCommand extends Command
             $this->em->persist($job);
             $this->em->flush();
         } catch (\Throwable $e) {
+            $output->writeln(sprintf('Job #%d : echec de sauvegarde — %s: %s', $job->getId(), get_class($e), $e->getMessage()));
             $this->logger->critical('Witty : echec de sauvegarde de l etat du job (EntityManager probablement ferme).', [
                 'job_id'    => $job->getId(),
                 'exception' => $e,

@@ -155,6 +155,10 @@ class ProcessBackgroundJobsCommandTest extends TestCase
         // d'EntityManager ferme, pas apres avoir enchaine d'autres passages
         // voues au meme echec.
         $this->assertSame(1, $handler->callsFor($job));
+        // Question posee en session : l'erreur exacte doit etre visible
+        // directement dans la sortie du cron (Coolify), pas seulement dans
+        // le log Mautic separe qu'il faut aller chercher a part.
+        $this->assertStringContainsString('EntityManager deja ferme avant la sauvegarde', $tester->getDisplay());
     }
 
     public function testFlushExceptionStopsTheRunGracefullyInsteadOfCrashing(): void
@@ -180,6 +184,51 @@ class ProcessBackgroundJobsCommandTest extends TestCase
         $tester->execute([]);
 
         $this->assertSame(Command::FAILURE, $tester->getStatusCode());
+        $this->assertStringContainsString('echec de sauvegarde', $tester->getDisplay());
+        $this->assertStringContainsString('The EntityManager is closed.', $tester->getDisplay());
+    }
+
+    /**
+     * Question posee en session ("il faut que tu affiche l erreur exact") :
+     * quand processChunk() leve une exception (le cas le plus courant en
+     * pratique — une vraie panne fournisseur/DB au milieu du traitement),
+     * son message COMPLET doit apparaitre directement dans la sortie du
+     * cron, pas seulement dans le log Mautic separe.
+     */
+    public function testProcessChunkExceptionMessageIsVisibleInTheConsoleOutput(): void
+    {
+        $job = $this->job('t', 'A');
+
+        $handler = new class implements JobHandlerInterface {
+            public function getType(): string { return 't'; }
+            public function allowsMultiplePassesPerTick(): bool { return false; }
+            public function processChunk(WittyBackgroundJob $job): void
+            {
+                throw new \RuntimeException('SQLSTATE[40001]: Deadlock found when trying to get lock; try restarting transaction');
+            }
+        };
+
+        $repository = $this->createMock(WittyBackgroundJobRepository::class);
+        $repository->method('findRunnable')->willReturn([$job]);
+
+        $em = $this->createMock(EntityManagerInterface::class);
+        $em->method('isOpen')->willReturn(true);
+
+        $command = new ProcessBackgroundJobsCommand(
+            new JobHandlerRegistry([$handler]),
+            $repository,
+            $em,
+            $this->createMock(LoggerInterface::class),
+        );
+
+        $tester = new CommandTester($command);
+        $tester->execute([]);
+
+        $display = $tester->getDisplay();
+        $this->assertStringContainsString('ECHEC', $display);
+        $this->assertStringContainsString('RuntimeException', $display);
+        $this->assertStringContainsString('SQLSTATE[40001]: Deadlock found when trying to get lock', $display);
+        $this->assertSame(WittyBackgroundJob::STATUS_FAILED, $job->getStatus());
     }
 
     private function job(string $type, string $label): WittyBackgroundJob

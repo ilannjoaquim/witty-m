@@ -648,6 +648,17 @@ une classe taguée = une capacité de plus, rien à câbler ailleurs.
   contre un scénario réel** (pas seulement raisonné) : `isOpen()=false` et `flush()` qui lève une
   exception simulent chacun le bug de production, les deux confirmés gérés sans plantage
   (`Command::FAILURE`, boucle arrêtée après un seul tick).
+- **L'exception exacte doit être visible sans creuser un second fichier de log** — question posée en
+  session après coup : arrêter proprement (`Command::FAILURE`) ne servait à rien pour diagnostiquer si
+  le seul message affiché restait générique ("EntityManager fermé..."), l'exception Doctrine d'origine
+  n'existant que dans `var/logs/mautic_prod-*.log` (le logger Mautic), jamais dans la sortie du cron
+  elle-même (ce que Coolify affiche, l'endroit où l'utilisateur regarde en premier). Corrigé : le
+  `catch` autour de `processChunk()` et les deux branches de `persistAndFlush()` écrivent désormais
+  `sprintf('%s: %s', get_class($e), $e->getMessage())` directement via `$output->writeln()`, en plus
+  du log Mautic existant (pas à la place). **Vérifié contre un scénario réel** : une exception
+  `RuntimeException` avec un message de deadlock MySQL simulé apparaît telle quelle
+  (`Job #0 (t) : ECHEC — RuntimeException: SQLSTATE[40001]: Deadlock found...`) dans la sortie de
+  `CommandTester`, plus besoin d'aller chercher ailleurs pour la toute première lecture.
 - **`start_apollo_bulk_enrich_people`/`start_quickenrich_bulk_search`/`start_bulk_mcp_search`** — un
   outil de déclenchement par intégration (schéma typé, propre à chacune) plutôt qu'un unique outil
   générique à paramètres libres : plus fiable pour un modèle de tool-calling qu'un `params: object`
