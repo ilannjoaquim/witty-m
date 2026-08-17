@@ -866,6 +866,37 @@ chaque lot en tâche de fond) :
   correspond exactement à la liste Mautic) avant écriture, pour `country` **et** `companycountry`.
 - **`prepareMany()`** — même chose pour un lot (`bulk_create_contacts`, `import_leads_from_file`) :
   les définitions de champ sont récupérées une seule fois pour tout le lot, pas une fois par ligne.
+- **Valeur trop longue pour la colonne réelle → tronquée, plutôt que de faire planter l'écrit.**
+  Troisième bug de production, distinct des deux premiers (pas silencieux, celui-là plantait franchement) :
+  un intitulé de poste QuickEnrich/Apollo de plus de 191 caractères dans `position` (`varchar(191)`
+  réel) faisait échouer la requête en `SQLSTATE[22001] Data too long for column` — MySQL en mode
+  strict refuse plutôt que de tronquer silencieusement. Pire : `LeadModel::saveEntity()` fermant
+  l'EntityManager sur cette erreur (cf. section `witty:jobs:process` plus haut), le job restait
+  bloqué sur le **même** élément à chaque passage de cron, en boucle. `LeadField::$charLengthLimit`
+  (table `lead_fields`) s'est révélé **peu fiable** pour se prémunir de ça : vérifié en base, `position`
+  y vaut `64` alors que la vraie colonne fait `191` — cette métadonnée semble purement indicative côté
+  formulaire pour un champ par défaut, jamais synchronisée avec la colonne réelle. `FieldWriteGuard`
+  lit donc la largeur réelle directement via `INFORMATION_SCHEMA.COLUMNS` (même principe que la
+  lecture SQL native de `linkedin` dans `QuickenrichBulkEnrichPeopleJobHandler` : la source de vérité
+  est la structure de table, jamais une métadonnée Mautic susceptible de diverger), mémorisée par
+  objet (`lead`/`company`) pour la durée de la requête, et tronque (`mb_substr`, sûr multi-octets) toute
+  valeur qui dépasserait. Sans effet sur un champ `TEXT`/`LONGTEXT` (largeur réelle bien plus grande,
+  jamais atteinte en pratique). **Vérifié contre la vraie base locale** (pas seulement raisonné) : la
+  colonne `position` lue en direct (191), une valeur de 380 caractères tronquée à 191 pile, sans casser
+  la normalisation pays déjà en place dans le même appel.
+- **Cas particulier des liens sociaux : élargir la colonne plutôt que tolérer la troncature**
+  (`Migrations/Version_3_3_0.php`). Tronquer fonctionne pour un intitulé de poste (reste lisible,
+  juste raccourci), mais casse un lien LinkedIn — coupé à 191 caractères, l'URL est morte. `linkedin`,
+  `facebook`, `foursquare`, `instagram`, `skype`, `twitter` (champs "social" par défaut de Mautic)
+  sont **tous** des `varchar(191)` réels, alors qu'une URL de profil chargée de paramètres de tracking
+  (`utm_source`, `trk`, `originalSubdomain`...) les dépasse facilement. Migration `ALTER TABLE leads
+  MODIFY {colonne} VARCHAR(500) DEFAULT NULL` sur les six colonnes, idempotente (`isApplicable()`
+  n'applique que les colonnes encore `< 500`, saute celles déjà élargies ou absentes). Aucun changement
+  de code côté `FieldWriteGuard` : il lit la largeur réelle en direct via `INFORMATION_SCHEMA`, donc
+  voit de lui-même 500 dès la migration passée. **Vérifié contre la vraie base locale** : les six
+  colonnes confirmées à 500 après `mautic:plugins:reload` (`INFORMATION_SCHEMA.COLUMNS`), et une URL
+  LinkedIn de 222 caractères avec paramètres de tracking passe désormais intacte dans `FieldWriteGuard`
+  (avant la migration, elle aurait été coupée à 191, lien mort).
 
 **`list_fields`** (`Service/Tool/Tools/ListFieldsTool.php`) — outil de découverte complémentaire,
 demandé explicitement par l'utilisateur plutôt que de se reposer sur le seul rejet réactif : liste les

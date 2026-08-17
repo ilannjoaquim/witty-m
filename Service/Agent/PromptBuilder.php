@@ -313,7 +313,11 @@ class PromptBuilder
             .'champ absent de la donnee source (ex. QuickEnrich ne renvoie pas toujours linkedin/country selon les '
             .'filtres demandes) ou un chemin de mapping incorrect vers cette donnee source (aucune erreur remontee, '
             .'le champ est juste absent, cf. JobItemFilter::resolvePath) — la aussi, ne presente jamais une '
-            .'supposition comme un fait acquis, verifie.';
+            .'supposition comme un fait acquis, verifie. Une valeur plus longue que la colonne Mautic reelle (ex. '
+            .'un intitule de poste QuickEnrich/Apollo tres long dans position) est desormais tronquee automatiquement '
+            .'plutot que de faire planter l ecrit (bug de production reel corrige en session) — la donnee enregistree '
+            .'peut donc etre plus courte que celle recue, garde ca en tete si l utilisateur demande "le texte exact" '
+            .'d un champ potentiellement long.';
     }
 
     /**

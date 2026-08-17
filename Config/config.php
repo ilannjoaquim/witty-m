@@ -20,7 +20,7 @@ return [
     // Le changement de version declenche Engine::up() sur Migrations/ au prochain
     // mautic:plugins:reload : c'est ce qui cree les tables sur une instance ou le
     // plugin etait deja installe.
-    'version'     => '3.2.0',
+    'version'     => '3.3.0',
     'author'      => 'Witty',
 
     'routes' => [
