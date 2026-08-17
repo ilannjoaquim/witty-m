@@ -906,6 +906,112 @@ un autre champ où une valeur hors liste serait tout aussi silencieusement perdu
 `PromptBuilder` instruit l'agent de l'appeler avant d'écrire un alias incertain, plutôt que de deviner
 par analogie avec le nom du champ chez le fournisseur de données.
 
+#### Suppression de contact/entreprise (`delete_contact`, `delete_company`) et pagination réelle de la recherche
+
+**Deux manques constatés en session, rapportés directement par l'agent** ("je n'ai aucun outil de
+suppression de contact", "je ne peux pas parcourir ~55 000 contacts, `search_contacts` plafonné à 100
+résultats sans pagination réelle") : impossible de retirer un contact/une entreprise, et impossible de
+savoir où s'arrêter en parcourant un gros volume par recherche.
+
+- **Pourquoi absents de `delete_entity`/`EntityCatalog`** : `Lead`/`Company` ne suivent pas le même
+  moule que les types du catalogue. `EntityCatalog::isAllowed()` résout own/other via
+  `$entity->getCreatedBy()` ; un contact résout la permission via `Lead::getPermissionUser()` (le
+  propriétaire assigné, pas le créateur) et Mautic vérifie en plus un verrou d'édition
+  (`LeadModel::isLocked()`/`CompanyModel::isLocked()`) que le catalogue générique ne gère pas.
+  `DeleteContactTool`/`DeleteCompanyTool` reproduisent donc exactement la logique de
+  `LeadController::deleteAction()`/`CompanyController::deleteAction()` du cœur plutôt que d'étendre le
+  catalogue avec un cas particulier de plus. Différence notable entre les deux : un contact vérifie
+  `hasEntityAccess('lead:leads:deleteown', 'lead:leads:deleteother', $lead->getPermissionUser())`, une
+  entreprise ne vérifie **que** `isGranted('lead:leads:deleteother')` — pas de distinction own/other
+  côté cœur pour les entreprises, vérifié dans `CompanyController::deleteAction()`. Supprimer une
+  entreprise ne supprime jamais les contacts qui lui étaient rattachés — vérifié contre la vraie base
+  locale (`INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS`) : seule `companies_leads` (table de liaison) a
+  une contrainte `ON DELETE CASCADE` vers `companies.id`, `leads` n'a aucune clé étrangère vers
+  `companies`. Comme `delete_entity`, confirmation systématique (`confirmed=true`), même si le mode
+  confirmation global est désactivé : irréversible, historique/points/appartenance aux
+  segments-campagnes disparaissent avec pour un contact. **Vérifié contre la vraie base locale** (pas
+  seulement raisonné) : un contact jetable créé puis supprimé via l'outil confirmé (bien parti après),
+  un aperçu sans `confirmed=true` ne touche jamais la base (contact/entreprise toujours présents après
+  l'appel), une permission refusée bloque avant même l'aperçu.
+- **Pagination cassée de `search_contacts`/`search_companies`, bug réel trouvé en vérifiant** :
+  `start` était figé à `0` en dur (aucune pagination possible, quel que soit l'argument), et `count`
+  dans la réponse ne comptait que les lignes de LA page reçue, pas le total réel — l'agent n'avait
+  aucun moyen de savoir combien de pages restaient. Première tentative de correctif basée sur
+  `Doctrine\ORM\Tools\Pagination\Paginator::count()` (comme la majorité des repositories Mautic) :
+  **fausse piste, détectée par le test manuel** (total = 5 sur la page 1, total = 1 sur la page 2 d'une
+  même recherche — impossible pour un vrai total). Cause : `LeadRepository`/`CompanyRepository`
+  redéfinissent entièrement `getEntities()` via `CustomFieldRepositoryTrait::getEntitiesWithCustomFields()`
+  (support des champs personnalisés), qui ne renvoie **jamais** un `Paginator`, juste le tableau de la
+  page courante — sauf si `withTotalCount => true` est explicitement demandé dans les arguments, auquel
+  cas une vraie requête `COUNT(...)` séparée s'exécute (GROUP BY neutralisé pour rester correcte même
+  avec les filtres de recherche avancée de Mautic) et la réponse devient
+  `['count' => total, 'results' => [...]]`. Corrigé : `start` transmis tel quel (bornée à `>= 0`),
+  `withTotalCount => true` systématique, `total` exposé dans la réponse à côté de `count`
+  (résultats de cette page) et `start` (pour que l'agent sache où il en est). L'agent est instruit
+  (`PromptBuilder`) de ré-appeler l'outil en augmentant `start` de `limit` jusqu'à couvrir `total`.
+  **Vérifié contre la vraie base locale** : deux pages consécutives d'une même recherche renvoient
+  désormais un total identique et des ID disjoints.
+- **Ce qui reste absent, assumé** : `search_contacts`/`search_companies` restent des outils de lecture
+  page par page — aucun traitement côté serveur pour appliquer une action en masse **arbitraire**
+  (suppression, modification) sur un ensemble filtré par une recherche texte à grande échelle.
+  `PromptBuilder` instruit l'agent de prévenir l'utilisateur de cette limite plutôt que d'enchaîner des
+  dizaines d'appels un par un en prétendant que c'est la bonne méthode. Le dédoublonnage, lui, a un
+  outil dédié (voir ci-dessous) — un vrai traitement de masse piloté par une recherche *arbitraire*
+  (au-delà du pipeline d'import déjà existant et du dédoublonnage) resterait à concevoir séparément si
+  le besoin se confirme.
+
+#### Dédoublonnage de contacts en masse (`start_deduplicate_contacts`)
+
+**Demande directe de l'utilisateur, suite au constat ci-dessus** : "il ne peut pas avoir un outil qui
+récupère les 55k contacts, puis récupère les id des doublons et les supprime ensuite ?". Trois
+décisions structurantes, prises avant d'écrire la moindre ligne :
+
+- **Fusionner, pas supprimer** (choix explicite de l'utilisateur, question posée directement :
+  supprimer perd l'historique/points/campagnes du doublon, fusionner les conserve). Réutilise
+  `Mautic\LeadBundle\Deduplicate\ContactMerger`, le service du cœur Mautic déjà utilisé par la fusion
+  manuelle depuis l'UI (`LeadController::mergeAction()`) — mêmes règles exactement : la donnée la plus
+  récente des deux fiches gagne champ par champ, les points s'additionnent, les tags/IP/propriétaire du
+  perdant rejoignent le survivant, un `MergeRecord` journalise l'opération (visible depuis la fiche du
+  survivant), puis le perdant est supprimé. Rien n'est réinventé, rien n'est perdu.
+- **Quelle définition du "doublon" ?** Pas un critère inventé ici : `DuplicateContactGroupFinder`
+  réutilise les champs cochés **"identifiant unique"** dans Mautic (Réglages > Champs) — exactement ce
+  que `LeadModel::checkForDuplicateContact()` utilise déjà pour détecter un doublon un par un à
+  l'import/en formulaire, ici étendu pour les **énumérer en masse** (une requête `GROUP BY ... HAVING
+  COUNT(*) > 1` par champ, sur la vraie colonne SQL — jamais un aller-retour par contact). **Piège
+  détecté et évité en vérifiant contre la vraie base locale** : un champ peut être marqué identifiant
+  unique pour l'objet **`company`** (`companyname`, présent par défaut sur cette instance) sans rien
+  dire de deux **contacts** — deux personnes qui travaillent pour la même entreprise ne sont pas la
+  même personne. Seuls les champs `object=lead` sont pris en compte, jamais ceux à `object=company`.
+  Si plusieurs champs sont marqués identifiant unique côté contact (ex. email ET téléphone) et qu'un
+  contact apparaît dans deux groupes distincts, ils sont fusionnés en un seul cluster (union-find) pour
+  ne jamais risquer de fusionner deux fois le même contact dans le même job.
+- **Une seule confirmation couvre tout le lot**, pas une par paire : contrairement à une donnée
+  d'enrichissement (jugement humain nécessaire sur sa qualité), la fusion est mécanique une fois le
+  champ identifiant unique choisi par l'utilisateur *dans Mautic lui-même* — exiger une validation par
+  paire serait impraticable sur des centaines de groupes sans garantie supplémentaire. `PromptBuilder`
+  documente explicitement pourquoi ce cas fait exception à la règle habituelle "jamais d'écriture
+  automatique sans revue" des autres jobs de fond (enrichissement/recherche) : contrairement à eux,
+  `DeduplicateContactsJobHandler` écrit réellement sur les contacts, comme les handlers d'import.
+
+Traitement en arrière-plan via le pipeline de jobs déjà existant (`start_deduplicate_contacts` calcule
+les groupes une fois, `DeduplicateContactsJobHandler` les fusionne 20 par 20 à chaque passage de cron,
+`allowsMultiplePassesPerTick()=true` car aucun appel API externe). Un perdant déjà absent (fusionné par
+un chevauchement résiduel, ou supprimé entre-temps) est tracé comme ignoré, pas une erreur qui ferait
+échouer le job — même principe que les autres handlers de cette section.
+
+**Vérifié contre la vraie base locale** (pas seulement raisonné) : trois contacts jetables créés avec le
+même email, détectés comme un seul groupe (le plus ancien en tête), fusionnés via
+`DeduplicateContactsJobHandler::processChunk()` — la donnée la plus récente (`firstname` du 3ᵉ contact)
+a bien gagné sur le survivant, les deux perdants confirmés absents *au niveau Doctrine brut*
+(`EntityManager::find()`, sans le mécanisme de redirection décrit ci-dessous). **Sous-produit
+intéressant de cette vérification**, à ne pas confondre avec un bug : `LeadModel::getEntity()` sur l'id
+d'un perdant fraîchement fusionné ne renvoie PAS `null` — il consulte `MergeRecordRepository::findMergedContact()`
+et redirige automatiquement vers le survivant (`ContactMerger` écrit ce `MergeRecord` justement pour ça).
+Comportement voulu du cœur Mautic (un ancien lien/référence vers l'id fusionné retrouve son propriétaire
+actuel plutôt qu'un simple 404), pas une fuite de données — mais à connaître : `getEntity()` n'est donc
+pas fiable pour vérifier qu'un contact a bien disparu après une fusion, seule une requête SQL directe ou
+`EntityManager::find()` le confirme sans ce mécanisme de redirection.
+
 ### Pièces jointes (docs, tableurs, images, polices)
 
 Un bouton trombone dans le chat permet de joindre un fichier (image, CSV/XLS/XLSX, texte, PDF/
@@ -1174,10 +1280,12 @@ outils.
 | `read_form` | | Détail complet d'un formulaire existant (champs avec alias, actions avec id) — préalable à update_form |
 | `update_form` | ● | Ajoute/modifie/supprime des champs et des actions d'un formulaire déjà créé, un par un (op=add\|update\|remove) |
 | `create_segment` | ● | Segment + filtres |
-| `search_contacts` | | Recherche de contacts |
+| `search_contacts` | | Recherche de contacts, `total` réel dans la réponse pour paginer via `start`/`limit` |
 | `list_fields` | | Alias, label, type et valeurs acceptées des champs contact/entreprise réellement définis dans Mautic |
 | `create_contact` | ● | Contact (refuse le doublon d'email) |
 | `update_contact` | ● | Champs d'un contact existant, id ou email |
+| `delete_contact` | ● | Suppression définitive d'un contact, `confirmed: true` obligatoire même hors mode confirmation |
+| `start_deduplicate_contacts` | ● | Détecte et fusionne en arrière-plan tous les contacts en double (même définition de doublon que Mautic) |
 | `manage_contact_segments` | ● | Ajoute/retire un contact d'un ou plusieurs segments |
 | `bulk_create_contacts` | ● | Crée/met à jour jusqu'à 500 contacts d'un coup (ex. depuis une recherche `prospeo_*`/un enrichissement Apollo) et les rattache à un segment |
 | `enrich_person` | | Enrichit un profil via Apollo (titre, entreprise, email si `reveal_personal_emails`) |
@@ -1202,9 +1310,10 @@ outils.
 | `start_contacts_import_from_job` | ● | Convertit/enrichit en arrière-plan les résultats d'un job terminé en contacts Mautic (mapping/filtres déclaratifs, met à jour par id si le job source est un enrichissement) |
 | `start_companies_import_from_job` | ● | Applique en arrière-plan les résultats d'un job d'enrichissement d'entreprises terminé sur les entreprises Mautic correspondantes (toujours une mise à jour, jamais une création) |
 | `manage_tags` | ● | Liste les tags, en pose/retire sur un contact, ou en supprime un définitivement |
-| `search_companies` | | Recherche d'entreprises |
+| `search_companies` | | Recherche d'entreprises, `total` réel dans la réponse pour paginer via `start`/`limit` |
 | `create_company` | ● | Entreprise |
 | `update_company` | ● | Champs d'une entreprise existante |
+| `delete_company` | ● | Suppression définitive d'une entreprise (contacts rattachés conservés), `confirmed: true` obligatoire même hors mode confirmation |
 | `manage_company_contacts` | ● | Rattache/détache un contact d'une entreprise |
 | `create_campaign` | ● | Campagne + canvas |
 | `describe_campaign_events` | | Catalogue des événements de campagne installés |

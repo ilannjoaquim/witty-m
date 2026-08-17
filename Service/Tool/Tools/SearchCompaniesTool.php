@@ -26,7 +26,10 @@ class SearchCompaniesTool extends AbstractTool
 
     public function getDescription(): string
     {
-        return 'Recherche des entreprises par nom (ou tout autre champ texte indexe par Mautic).';
+        return 'Recherche des entreprises par nom (ou tout autre champ texte indexe par Mautic). '
+            .'La reponse inclut total (nombre d entreprises correspondant a la requete, au-dela de cette '
+            .'seule page) : pour parcourir un ensemble qui depasse 100 resultats, rappelle cet outil en '
+            .'augmentant start de limit a chaque fois (start=0, puis 100, puis 200...) jusqu a avoir couvert total.';
     }
 
     public function getRequiredPermission(): ?string
@@ -39,16 +42,25 @@ class SearchCompaniesTool extends AbstractTool
         return $this->schema([
             'query' => ['type' => 'string', 'description' => 'Texte de recherche, ex. nom de l entreprise.'],
             'limit' => ['type' => 'integer', 'description' => 'Defaut 20, max 100.'],
+            'start' => ['type' => 'integer', 'description' => 'Decalage de pagination (nombre de resultats a sauter). Defaut 0.'],
         ], ['query']);
     }
 
     public function execute(array $arguments): array
     {
-        $companies = $this->companyModel->getEntities([
-            'start'  => 0,
-            'limit'  => max(1, min(100, (int) ($arguments['limit'] ?? 20))),
-            'filter' => ['string' => (string) ($arguments['query'] ?? '')],
+        // Meme piege que LeadRepository (cf. SearchContactsTool) : CompanyRepository
+        // delegue aussi a CustomFieldRepositoryTrait::getEntitiesWithCustomFields(),
+        // pas un Paginator -- withTotalCount=true est la seule facon d obtenir un
+        // vrai total independant de la page courante.
+        $response = $this->companyModel->getEntities([
+            'start'          => max(0, (int) ($arguments['start'] ?? 0)),
+            'limit'          => max(1, min(100, (int) ($arguments['limit'] ?? 20))),
+            'filter'         => ['string' => (string) ($arguments['query'] ?? '')],
+            'withTotalCount' => true,
         ]);
+
+        $total     = (int) ($response['count'] ?? 0);
+        $companies = $response['results'] ?? [];
 
         $items = [];
 
@@ -67,6 +79,11 @@ class SearchCompaniesTool extends AbstractTool
             ];
         }
 
-        return $this->ok(['count' => count($items), 'companies' => $items]);
+        return $this->ok([
+            'count'     => count($items),
+            'total'     => $total,
+            'start'     => max(0, (int) ($arguments['start'] ?? 0)),
+            'companies' => $items,
+        ]);
     }
 }
