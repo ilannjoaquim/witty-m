@@ -1062,6 +1062,55 @@ fait à la sélection du fichier, pas à l'envoi du message : `POST /witty/uploa
   synchrone et plafonné à 500 lignes plutôt que branché sur le moteur d'import asynchrone natif de
   Mautic (`LeadBundle\Model\ImportModel`, pensé pour un assistant pas-à-pas + cron) — suffisant pour
   une liste de quelques centaines de contacts, largement le cas d'usage visé depuis le chat.
+
+#### Import de fichier volumineux (`start_contacts_import_from_file`)
+
+**Manque réel signalé en session** : un export Apollo de 9 949 lignes, refusé net par
+`import_leads_from_file` ("Fichier trop volumineux pour un import direct, maximum 500") — sans
+aucun moyen de contourner la limite, ni de rattacher les contacts importés à un segment (paramètre
+absent du chemin synchrone). L'agent a correctement diagnostiqué les deux manques mais n'avait que
+l'UI Mautic native à proposer en repli.
+
+- **Même pipeline de jobs de fond que les autres imports en masse**
+  (`Service/Job/Handlers/ImportContactsFromFileJobHandler.php`, type `import_contacts_from_file`),
+  mais avec une différence structurelle : les autres handlers d'import (`ImportContactsFromJobHandler`)
+  consomment des `WittyBackgroundJobItem` déjà produits par un job de RECHERCHE (Apollo/QuickEnrich/MCP)
+  — ici, il n'y a pas de job source, seulement un fichier sur disque. Plutôt qu'une étape
+  d'ingestion séparée (parser le fichier une fois pour le transformer en `WittyBackgroundJobItem`,
+  comme le ferait un job de recherche), le handler **relit et retranche le fichier par `offset` à
+  chaque `processChunk()`** — plus simple, sans étape intermédiaire ni doublon de stockage.
+  **Mesuré en session** (pas supposé) sur un vrai fichier de 9 949 lignes, CSV et XLSX : ~1,5-1,8 s
+  par lecture complète, négligeable même relu plusieurs fois par passage de cron de 50 s.
+- **`allowsMultiplePassesPerTick()=true`** (aucun appel API externe, uniquement lecture disque +
+  écritures Mautic locales, même justification que `ImportContactsFromJobHandler`) — le fichier
+  entier se traite en plusieurs passages de cron rapprochés sans intervention.
+- **Piège réel trouvé en vérifiant contre le vrai kernel booté en CLI** : `AttachmentManager::resolve()`
+  dépend de l'utilisateur HTTP courant (`UserHelper::getUser()`, via `requireUser()`) — en contexte
+  cron (`witty:jobs:process`, sans session), ça renvoie un `User` "invité" avec `id=null`, donc
+  `resolve()` échouerait à **chaque** tick. Le handler récupère donc la pièce jointe directement via
+  l'`EntityManager` (jamais via `resolve()`), avec une vérification explicite que
+  `attachment->getUser()` correspond bien à `job->getCreatedBy()` (défense en profondeur, l'un ou
+  l'autre ne devrait jamais diverger vu que `start_contacts_import_from_file` valide déjà l'un contre
+  l'autre à la création du job). `readSpreadsheetAll(WittyAttachment $attachment)`, en revanche,
+  vérifié sans dépendance à l'utilisateur courant — reste utilisable tel quel depuis le handler.
+- **Segment enfin possible** : `segment_id` optionnel, transmis à `ContactImporter::importOne()`
+  (déjà utilisé par `ImportContactsFromJobHandler`, jamais dupliqué) — chaque contact créé/mis à jour
+  est rattaché, dédoublonnage par email comme `import_leads_from_file`.
+- **Pas de nouvelle logique de mapping** : `Service/Job/SpreadsheetRowMapper.php`, fonction pure
+  sans dépendance injectée, extraite pour être utilisée **à l'identique** par l'aperçu de l'outil
+  (avant confirmation) et le traitement réel du handler (par lot) — jamais dupliquée entre les deux,
+  pour ne jamais risquer un aperçu qui promette autre chose que ce que le job fait réellement.
+- **Vérifié contre la vraie base locale, de bout en bout** (pas seulement raisonné) : un fichier CSV
+  de 9 949 lignes réellement importé jusqu'à complétion (199 passages de lot de 50, ~2,8 s/lot,
+  ~9,3 min au total en exécution séquentielle directe — largement moins réparti sur plusieurs
+  passages de cron d'une minute en production réelle), tous les champs mappés correctement vérifiés
+  sur un contact (prénom, poste, entreprise, LinkedIn, pays), rattachement au segment confirmé en
+  base (`lead_lists_leads`), puis tout nettoyé.
+- **`PromptBuilder`** instruit désormais l'agent : `import_leads_from_file` (≤ 500 lignes, sans
+  segment) reste le bon choix pour une petite liste ; dès que le fichier dépasse 500 lignes **ou**
+  qu'un segment est demandé, `start_contacts_import_from_file` est le chemin correct — jamais un
+  renvoi vers l'import natif de l'interface Mautic comme seule option, ce chemin existe précisément
+  pour ce cas.
   **Police** — au-delà de l'URL d'asset, `AttachmentManager::previewFont()` renvoie un exemple de
   règle `@font-face` prêt à adapter (`format()` dérivé de l'extension, nom de famille dérivé du nom
   de fichier) : contrairement à une image, une police ne s'utilise pas juste en collant une URL dans
@@ -1342,6 +1391,7 @@ outils.
 | `read_attachment` | | Lit une piece jointe du chat (texte, apercu de tableur, ou URL d'asset pour image/document) |
 | `list_attachments` | | Retrouve un fichier deja envoye par son nom (bibliotheque Fichiers), pas seulement ceux du message en cours |
 | `import_leads_from_file` | ● | Import de contacts depuis un tableur joint, plafonne a 500 lignes, mapping de colonnes fourni par l'agent |
+| `start_contacts_import_from_file` | ● | Import de contacts depuis un tableur joint EN ARRIERE-PLAN, sans plafond de lignes, avec rattachement a un segment optionnel |
 
 `update_entity` et `delete_entity` acceptent plusieurs types d'objets : leur permission ne peut
 donc pas être déclarée une fois pour toutes sur l'outil, elle est vérifiée **objet par objet**
@@ -1608,6 +1658,32 @@ tracking fonctionnent — jamais un merge tag serveur. Conséquence assumée par
 contrairement à l'ancien mécanisme (MJML source enregistré dans `bundle_grapesjsbuilder` à la
 création de l'email), un email créé depuis un template géré ici n'est plus éditable dans le builder
 MJML — seul le HTML brut.
+
+**Bug réel constaté en session, invisible dans le builder** : un email signalé "nickel dans
+l'aperçu mais reçu sans aucun style" (bordures, marges, padding, tout absent). Cause trouvée en
+lisant le HTML fourni par l'utilisateur : le mode code source avait été écrit avec le réflexe d'une
+page web classique — une **seule** feuille `<style>` centralisée, ciblant chaque élément par
+class/id (contrairement au mode MJML, qui répète ses styles en inline sur chaque élément — voir plus
+haut) — au lieu du CSS structurel inliné directement en `style=""` sur chaque élément, la norme des
+emails pro (Mailchimp et consorts). Un navigateur (donc l'aperçu du builder Mautic) applique n'importe
+quel CSS quel que soit l'endroit du DOM — aucun symptôme visible à la création. Un client mail réel,
+lui, nettoie le HTML reçu et la plupart (Gmail en tête) suppriment les règles class/id d'un `<style>`
+de façon imprévisible : rien ne remonte d'erreur, le style disparaît juste entièrement à la réception.
+**Investigation menée pour écarter une reformulation côté plugin** avant de conclure à un problème de
+génération : `CreateEmailTool`/`CreateTemplateTool` stockent le HTML fourni **verbatim**
+(`setCustomHtml($html)`/`setHtml($html)`, aucun passage par un parseur DOM), `PlaceholderRenderer` ne
+fait que substituer du texte dans les `{{CLE}}` sans jamais toucher au CSS/à la structure, et
+`EmailBundle\Helper\MailHelper` n'a aucune passe de nettoyage/sanitisation du HTML avant l'envoi
+(seul `strip_tags()` sur une COPIE utilisée pour la version texte brute, jamais sur le HTML envoyé) —
+le plugin ne reformate rien, le HTML part exactement tel qu'écrit. Le vrai trou : rien n'obligeait
+l'agent à inliner le CSS structurel d'un email. `PromptBuilder` impose désormais : tout le CSS
+structurel/visuel (padding, margin, border, background, color, font...) en `style=""` sur chaque
+élément ; un unique bloc `<style>` dans `<head>` (jamais ailleurs) reste légitime **uniquement** pour
+ce qui ne peut pas s'inliner — `@media` (responsive mobile) et les pseudo-classes comme `:hover`. Si un
+utilisateur signale ce symptôme précis (nickel à l'aperçu, vide à la réception), l'agent est instruit
+de vérifier en premier (`read_entity_content`) si le CSS structurel repose sur des classes/ids plutôt
+que d'être inline, et de corriger en ré-écrivant le document (`update_entity_content`) avec le CSS
+critique inline — pas seulement déplacer le bloc `<style>`.
 
 **La substitution est faite par le plugin, pas par le modèle.** Demander à un LLM de recracher
 1 200 lignes de HTML compilé sans faute n'est pas fiable : il fournit le texte de chaque bloc,
