@@ -323,6 +323,23 @@ class WittyTemplate
      * Definition exposee au modele : le libelle et la consigne comptent
      * autant que la cle.
      *
+     * Bug reel corrige en session : 'context' etait absent d'ici alors que
+     * update_template/create_template l'acceptent en entree (contexte
+     * d'echappement html/html_br/js, cf. PlaceholderRenderer) et exigent un
+     * remplacement INTEGRAL du tableau placeholders. Un aller-retour
+     * list_email_templates/list_page_templates -> update_template (meme pour
+     * modifier un seul champ d'un seul emplacement) effacait donc
+     * silencieusement le contexte reel de TOUS les autres emplacements du
+     * template, les faisant retomber sur 'html' par defaut — un placeholder
+     * en contexte js (ex. une valeur inseree dans une chaine JavaScript,
+     * cf. confirmation-webinar) se serait alors retrouve echappe pour du
+     * HTML au lieu du JS, cassant le script ; un placeholder html_br aurait
+     * perdu son <br> litteral. Toujours inclus explicitement ici (jamais
+     * omis meme pour la valeur par defaut 'html') pour que ce que l'agent
+     * relit soit exactement ce qu'update_template/create_template attendent
+     * en entree — vérifié contre la vraie base locale (confirmation-webinar,
+     * 12 emplacements js/html_br sur 37).
+     *
      * @return array<int, array<string, mixed>>
      */
     public function describePlaceholders(): array
@@ -333,6 +350,7 @@ class WittyTemplate
             'guidance' => $p['guidance'] ?? '',
             'example'  => $p['example'] ?? null,
             'default'  => $p['default'] ?? null,
+            'context'  => $p['context'] ?? 'html',
             'required' => !array_key_exists('default', $p),
         ], static fn ($value): bool => null !== $value), $this->placeholders);
     }

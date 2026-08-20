@@ -141,6 +141,11 @@ return [
                 'controller' => FileController::class.'::deleteAction',
                 'method'     => 'POST',
             ],
+            'witty_files_rename' => [
+                'path'       => '/witty/files/rename',
+                'controller' => FileController::class.'::renameAction',
+                'method'     => 'POST',
+            ],
 
             'witty_video_rooms' => [
                 'path'       => '/witty/video/rooms',

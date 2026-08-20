@@ -226,6 +226,67 @@ class AttachmentManager
     }
 
     /**
+     * Renomme une piece jointe (page Fichiers). Autonome (flush inclus), meme
+     * discipline que delete().
+     *
+     * L'extension reelle du fichier stocke (`extension`, fixee une fois pour
+     * toutes a l'upload) est TOUJOURS reappliquee au nom final, quoi que
+     * l'utilisateur ait tape : ni ce service ni le reste du plugin
+     * (readSpreadsheetAll(), previewFont()...) ne se fient au nom affiche
+     * pour deduire le type reel d'un fichier, seulement a `extension`/`kind` —
+     * un renommage ne doit donc jamais pouvoir laisser croire qu'un fichier a
+     * change de type (ex. taper "rapport.pdf" sur un CSV reste "rapport.csv").
+     *
+     * Pour un fichier adosse a un Asset Mautic (image/document/police, cf.
+     * upload()) : renomme aussi l'Asset (`title` ET `originalFileName`), pas
+     * seulement la piece jointe elle-meme. Necessaire pour de vrai, pas par
+     * souci de coherence cosmetique : `PublicController::localDownloadResponse()`
+     * (coeur Mautic) sert le fichier avec un en-tete
+     * `Content-Disposition: attachment;filename="{Asset::getOriginalFileName()}"` —
+     * sans ce second renommage, l'URL publique continuerait de proposer
+     * l'ANCIEN nom au telechargement alors que la page Fichiers en afficherait
+     * un nouveau, un ecart trompeur.
+     *
+     * @throws AttachmentInvalidException nom vide apres nettoyage
+     */
+    public function rename(WittyAttachment $attachment, string $newName): WittyAttachment
+    {
+        $extension = $attachment->getExtension();
+        $base      = trim((string) pathinfo(trim($newName), PATHINFO_FILENAME));
+
+        if ('' === $base) {
+            throw new AttachmentInvalidException('Le nouveau nom ne peut pas etre vide.');
+        }
+
+        // 191 : largeur reelle de original_filename (witty_attachments) ET de
+        // title (assets) — verifiee contre la vraie base, jamais supposee
+        // (meme piege que celui documente pour FieldWriteGuard : ne jamais se
+        // fier a une longueur devinee). Tronque le nom plutot que de laisser
+        // MySQL en mode strict rejeter purement et simplement l'ecriture.
+        $maxBaseLength = 191 - ('' !== $extension ? mb_strlen($extension) + 1 : 0);
+        $base          = mb_substr($base, 0, max(1, $maxBaseLength));
+
+        $newFilename = '' !== $extension ? $base.'.'.$extension : $base;
+
+        $attachment->setOriginalFilename($newFilename);
+
+        if (null !== $attachment->getAssetId()) {
+            $asset = $this->assetModel->getEntity($attachment->getAssetId());
+
+            if ($asset instanceof Asset) {
+                $asset->setOriginalFileName($newFilename);
+                $asset->setTitle($newFilename);
+                $this->assetModel->saveEntity($asset);
+            }
+        }
+
+        $this->entityManager->persist($attachment);
+        $this->entityManager->flush();
+
+        return $attachment;
+    }
+
+    /**
      * Supprime les uploads jamais rattaches a une conversation (fichier joint
      * puis jamais envoye) et non "pinned" (cf. WittyAttachment::$pinned).
      * Autonome (flush inclus) : ce n'est pas appele depuis le tour de

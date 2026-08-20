@@ -83,6 +83,23 @@ class FileController extends CommonController
         return new JsonResponse(['status' => true, 'deleted' => $id]);
     }
 
+    public function renameAction(Request $request, AttachmentManager $attachments): JsonResponse
+    {
+        $id       = (int) $request->request->get('id', 0);
+        $filename = (string) $request->request->get('filename', '');
+
+        try {
+            $attachment = $attachments->resolve($id);
+            $attachment = $attachments->rename($attachment, $filename);
+        } catch (AttachmentNotFoundException $e) {
+            return new JsonResponse(['status' => false, 'msg' => $e->getMessage()], Response::HTTP_NOT_FOUND);
+        } catch (AttachmentInvalidException $e) {
+            return new JsonResponse(['status' => false, 'msg' => $e->getMessage()], Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        return new JsonResponse(['status' => true, 'file' => self::toArray($attachment, $attachments)]);
+    }
+
     /**
      * @return array<string, mixed>
      */

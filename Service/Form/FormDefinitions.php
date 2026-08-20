@@ -30,6 +30,7 @@ class FormDefinitions
     /** Types d'action de soumission geres par ces outils. */
     public const ACTION_TYPES = [
         FormSubscriber::ACTION_KEY,
+        FormSubscriber::DNC_ACTION_KEY,
         'email.send.lead',
         'email.send.user',
         'lead.changelist',

@@ -105,9 +105,23 @@ class TemplateManager
         ));
     }
 
+    /** Champs reellement stockes pour un emplacement — tout le reste est ignore a l'ecriture. */
+    private const PLACEHOLDER_FIELDS = ['key', 'label', 'guidance', 'example', 'default', 'context'];
+
     /**
      * Normalise (cle en majuscules) et valide les emplacements. Meme usage
      * partage que normalizeRules().
+     *
+     * Ne garde QUE les champs de PLACEHOLDER_FIELDS, meme si l'appelant en
+     * fournit d'autres : defense en profondeur contre un aller-retour
+     * lecture/ecriture qui recopierait tel quel un champ calcule a la
+     * lecture (ex. 'required', renvoye par WittyTemplate::describePlaceholders()
+     * mais jamais stocke — le persister tel quel finirait par diverger de sa
+     * vraie valeur des qu'un 'default' est ajoute/retire ensuite, puisque
+     * rien ne le relit jamais depuis le stockage). 'context' reste explicite
+     * ('html' si absent) plutot qu'omis, pour la meme raison que
+     * describePlaceholders() l'inclut desormais toujours : un contexte
+     * js/html_br qui redeviendrait implicite se perdrait au prochain aller-retour.
      *
      * @param array<int, mixed> $placeholders
      *
@@ -122,8 +136,14 @@ class TemplateManager
                 return 'Chaque emplacement doit avoir une cle (key).';
             }
 
-            $placeholder['key'] = strtoupper(trim((string) $placeholder['key']));
-            $normalized[]       = $placeholder;
+            $clean = array_intersect_key($placeholder, array_flip(self::PLACEHOLDER_FIELDS));
+
+            $context = (string) ($placeholder['context'] ?? 'html');
+
+            $clean['key']     = strtoupper(trim((string) $placeholder['key']));
+            $clean['context'] = in_array($context, ['html', 'html_br', 'js'], true) ? $context : 'html';
+
+            $normalized[] = $clean;
         }
 
         return $normalized;

@@ -209,10 +209,84 @@ class AttachmentManagerTest extends TestCase
         $manager->resolve(42);
     }
 
+    public function testRenameKeepsTheRealExtensionEvenIfTheUserTypedNone(): void
+    {
+        $manager    = $this->manager();
+        $attachment = $manager->upload($this->uploadedFile('leads.csv', "Email\na@b.test\n"), null, true);
+
+        $renamed = $manager->rename($attachment, 'nouveau-nom-sans-extension');
+
+        $this->assertSame('nouveau-nom-sans-extension.csv', $renamed->getOriginalFilename());
+    }
+
+    public function testRenameNeverLetsTheDisplayedExtensionLieAboutTheRealFileType(): void
+    {
+        $manager    = $this->manager();
+        $attachment = $manager->upload($this->uploadedFile('leads.csv', "Email\na@b.test\n"), null, true);
+
+        // Un CSV qui pretendrait etre un .pdf induirait l'utilisateur en
+        // erreur (le fichier reste un CSV, seul le nom affiche mentirait).
+        $renamed = $manager->rename($attachment, 'rapport.pdf');
+
+        $this->assertSame('rapport.csv', $renamed->getOriginalFilename());
+    }
+
+    public function testRenameRejectsAnEmptyName(): void
+    {
+        $manager    = $this->manager();
+        $attachment = $manager->upload($this->uploadedFile('leads.csv', "Email\na@b.test\n"), null, true);
+
+        $this->expectException(AttachmentInvalidException::class);
+
+        $manager->rename($attachment, '   ');
+    }
+
+    public function testRenameTruncatesToTheRealColumnWidthRatherThanCrashing(): void
+    {
+        // 191 : largeur reelle de original_filename (witty_attachments) et de
+        // title (assets), verifiee contre la vraie base locale en session —
+        // jamais une valeur devinee. Meme principe que FieldWriteGuard.
+        $manager    = $this->manager();
+        $attachment = $manager->upload($this->uploadedFile('leads.csv', "Email\na@b.test\n"), null, true);
+
+        $renamed = $manager->rename($attachment, str_repeat('a', 300));
+
+        $this->assertSame(191, mb_strlen($renamed->getOriginalFilename()));
+        $this->assertStringEndsWith('.csv', $renamed->getOriginalFilename());
+    }
+
+    public function testRenameOfAnAssetBackedAttachmentAlsoRenamesTheAsset(): void
+    {
+        // Bug reel evite : PublicController::localDownloadResponse() (coeur
+        // Mautic) sert le fichier avec Content-Disposition base sur
+        // Asset::getOriginalFileName(), pas WittyAttachment::originalFilename.
+        // Sans ce second renommage, l'URL publique continuerait de proposer
+        // l'ancien nom au telechargement.
+        $asset = new \Mautic\AssetBundle\Entity\Asset();
+
+        $assetModel = $this->createMock(AssetModel::class);
+        $assetModel->method('getEntity')->with(7)->willReturn($asset);
+        $assetModel->expects($this->once())->method('saveEntity')->with($asset);
+
+        $manager = $this->manager([], null, $assetModel);
+
+        $attachment = new WittyAttachment();
+        $attachment->setOriginalFilename('ancienne-image.png')
+            ->setExtension('png')
+            ->setKind(WittyAttachment::KIND_IMAGE)
+            ->setAssetId(7);
+
+        $renamed = $manager->rename($attachment, 'nouvelle-image.png');
+
+        $this->assertSame('nouvelle-image.png', $renamed->getOriginalFilename());
+        $this->assertSame('nouvelle-image.png', $asset->getOriginalFileName());
+        $this->assertSame('nouvelle-image.png', $asset->getTitle());
+    }
+
     /**
      * @param array<string, mixed> $siteParameters
      */
-    private function manager(array $siteParameters = [], ?EntityManagerInterface $entityManager = null): AttachmentManager
+    private function manager(array $siteParameters = [], ?EntityManagerInterface $entityManager = null, ?AssetModel $assetModel = null): AttachmentManager
     {
         $user = $this->createMock(User::class);
         $user->method('getId')->willReturn(1);
@@ -233,7 +307,7 @@ class AttachmentManagerTest extends TestCase
             $userHelper,
             $pathsHelper,
             $coreParameters,
-            $this->createMock(AssetModel::class),
+            $assetModel ?? $this->createMock(AssetModel::class),
             new SpreadsheetReader(),
         );
     }

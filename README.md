@@ -1012,6 +1012,69 @@ actuel plutôt qu'un simple 404), pas une fuite de données — mais à connaît
 pas fiable pour vérifier qu'un contact a bien disparu après une fusion, seule une requête SQL directe ou
 `EntityManager::find()` le confirme sans ce mécanisme de redirection.
 
+### Campagnes (`create_campaign`)
+
+**Réécriture complète en session, suite à un rapport concret avec un export réel de campagne
+fonctionnelle en exemple** : l'agent était incapable de construire une vraie campagne — "les events
+ne sont pas reliés entre eux, les délais mal configurés, pas de vérification entre un email et un
+follow-up pour savoir si le prospect a répondu ou pas". Diagnostic confirmé en comparant l'ancien
+`CreateCampaignTool` à l'export fourni : l'outil ne savait produire qu'une **chaîne strictement
+linéaire** (`Event::TYPE_ACTION` imposé sur chaque étape, un seul lien `bottom→top` vers la
+suivante), sans aucun champ de planification horaire, et sans la moindre notion de decision/condition
+— alors que l'export montrait un vrai embranchement (`lead.segments`, `event_type: condition`, une
+branche `yes` seulement empruntée par le follow-up) et un envoi cadré (`trigger_hour: 08:00:00`,
+jours ouvrés uniquement).
+
+- **Le graphe, pas la chaîne.** Chaque étape référence celle dont elle dépend via `after_step`
+  (index 0-based dans le tableau `steps`, jamais un id inventé par l'agent) ; omis, elle s'enchaîne
+  simplement après l'étape précédente du tableau — comportement historique préservé pour une
+  séquence simple, aucune rupture pour l'usage déjà existant. `branch` (`yes`/`no`) est **obligatoire**
+  dès que l'étape parente est une decision/condition (laquelle des deux issues suivre), et **interdit**
+  sinon (une action normale n'a qu'une seule suite) — les deux sens de cette règle sont validés avant
+  toute écriture, message d'erreur explicite à l'appui. Mautic n'autorisant qu'un seul parent par
+  événement (`campaign_events.parent_id`), aucune fusion de branches n'est possible, seulement des
+  embranchements — plusieurs étapes peuvent en revanche partager le même parent (vrai fork, testé).
+- **La vérification demandée existe déjà nativement dans Mautic, juste jamais exposée** :
+  `email.open`/`email.click`/`email.reply` sont de vraies **decisions** du cœur
+  (`EmailBundle\EventListener\CampaignSubscriber::onCampaignBuild()`), avec une contrainte propre —
+  `connectionRestrictions` les limite à un placement juste après un événement `email.send`. L'outil
+  valide cette contrainte explicitement (`email_opened`/`email_clicked`/`email_replied` refusées avec
+  message clair si leur `after_step` ne pointe pas vers un step `send_email`) plutôt que de laisser
+  Mautic échouer silencieusement plus tard. `email_replied` répond très exactement à la demande
+  initiale : "email envoyé → 3 jours plus tard, a-t-il répondu ? → si non, relance ; si oui, ne pas
+  relancer" se construit avec une étape `send_email`, une étape `email_replied` (`after_step` sur la
+  précédente, `delay_days: 3`), puis une étape de relance sur `branch: "no"` et, si utile, une autre
+  sur `branch: "yes"` (ex. `add_tag` pour marquer l'intérêt).
+- **Conditions généralistes**, branchables n'importe où (pas seulement après un email) :
+  `in_segment` (`lead.segments`), `has_tag` (`lead.tags`), `field_value` (`lead.field_value`, opérateurs
+  `=`/`!=`/`gt`/`lt`/`contains`/`empty`/`!empty` — sous-ensemble volontairement restreint de
+  `Segment\OperatorOptions`, les plus lisibles pour un agent), `has_points` (`lead.points`),
+  `is_contactable` (`lead.dnc`).
+- **Planification horaire, sur n'importe quelle étape** (action, decision ou condition) :
+  `send_hour` (`Event::$triggerHour`), `restricted_start_hour`/`restricted_stop_hour` (plage horaire
+  autorisée), `restricted_days_of_week` (ex. `[1,2,3,4,5]`, jours ouvrés). Absents jusqu'ici du
+  schéma — un email généré par l'agent pouvait littéralement partir un dimanche à 3h du matin, sans
+  aucun moyen de l'en empêcher.
+- **Nouvelles actions**, absentes de l'ancienne version : `change_segments` (`lead.changelist`,
+  rejoindre/quitter des segments en cours de campagne), `update_contact_field` (`lead.updatelead`,
+  passé par `FieldWriteGuard::prepare()` comme tout le reste du plugin — même garde-fou alias/pays/
+  longueur que `create_contact`/`update_contact`), `change_owner` (`lead.changeowner`, existence de
+  l'utilisateur validée). `add_tag`/`remove_tag`/`add_points`/`send_email` reconduits tels quels
+  (déjà corrects).
+- **`channel`/`channel_id` désormais posés sur un `send_email`** (colonnes propres de
+  `campaign_events`, jamais dans `properties`) — absent de l'ancienne version, repéré en comparant
+  ligne à ligne l'export fourni : sans ça, les recoupements natifs Mautic basés sur ces colonnes (ex.
+  "quelles campagnes référencent l'email X ?") ne trouvaient jamais les événements créés par l'agent.
+- **Vérifié de bout en bout contre la vraie base locale** (pas seulement raisonné) : le scénario
+  exact ci-dessus (email → `email_replied` après 3 jours, horaires ouvrés → relance sur `no` / tag
+  sur `yes`) construit via l'outil, puis chaque ligne de `campaign_events` relue en base — `type`,
+  `event_type`, `parent_id`, `decision_path`, `channel`/`channel_id`, `trigger_hour`,
+  `trigger_restricted_start_hour`/`stop_hour`, `trigger_restricted_dow` — tous conformes ; les
+  connexions du canvas (`campaigns.canvas_settings`, sérialisé PHP natif, pas du JSON) confirmées
+  avec les bons anchors (`leadsource`/`bottom`/`yes`/`no`) exactement comme dans un export Mautic
+  réel ; les trois refus attendus (`email_replied` mal placée, `branch` fourni à tort, `branch`
+  manquant à tort) confirmés ; toutes les données de test nettoyées ensuite.
+
 ### Pièces jointes (docs, tableurs, images, polices)
 
 Un bouton trombone dans le chat permet de joindre un fichier (image, CSV/XLS/XLSX, texte, PDF/
@@ -1139,6 +1202,45 @@ l'UI Mautic native à proposer en repli.
   il ne connaissait que les pièces jointes du message en cours. Aucune nouvelle notion côté
   `AttachmentManager` : `upload()`/`resolve()`/`assetUrl()` sont déjà scopés par utilisateur, pas
   par conversation, la bibliothèque ne fait que les exposer sans filtre de conversation.
+- **Renommer un fichier, demandé explicitement, avec le menu classique Mautic** — le seul bouton
+  fantôme "Supprimer" par ligne est remplacé par le menu déroulant "..." (`ri-more-2-line`, dropdown
+  Bootstrap) utilisé dans les listings natifs de Mautic (ex. `LeadBundle/Resources/views/Field/list.html.twig`) :
+  Renommer, Télécharger (si le fichier a une URL d'asset publique — tableur/texte n'en ont pas),
+  Supprimer. Aucun câblage JS supplémentaire pour l'ouverture/fermeture : le plugin dropdown de
+  Bootstrap 3 (déjà chargé globalement par Mautic) délègue ses clics au niveau du `document`, donc
+  fonctionne aussi sur du HTML injecté dynamiquement par notre rendu JS côté client (pas de rendu
+  Twig serveur pour chaque ligne, contrairement aux listings natifs).
+  - **`AttachmentManager::rename()`** (nouvelle méthode) — l'extension réelle du fichier stocké
+    (`extension`, fixée une fois pour toutes à l'upload) est **toujours réappliquée** au nom final,
+    quoi que l'utilisateur tape : taper "rapport" (sans extension) donne `rapport.csv`, taper
+    "rapport.pdf" sur un vrai CSV reste `rapport.csv` — ni ce service ni le reste du plugin
+    (`readSpreadsheetAll()`, `previewFont()`...) ne se fient au nom affiché pour déduire le type
+    réel d'un fichier, un renommage ne doit donc jamais pouvoir laisser croire qu'un fichier a
+    changé de type. Nom tronqué (`mb_substr`, extension préservée) plutôt que rejeté si la valeur
+    dépasse **191 caractères** — largeur réelle de `original_filename` (`witty_attachments`) **et**
+    de `title` (`assets`), vérifiée contre `INFORMATION_SCHEMA.COLUMNS` de la vraie base locale
+    plutôt que supposée (même principe que le garde-fou de longueur de `FieldWriteGuard`, cf.
+    plus haut).
+  - **Piège réel trouvé en vérifiant, pas seulement raisonné** : pour un fichier adossé à un Asset
+    Mautic (image/document/police, cf. `upload()`), renommer *seulement* `WittyAttachment` aurait
+    laissé un écart trompeur — `PublicController::localDownloadResponse()` (cœur Mautic) sert le
+    fichier avec un en-tête `Content-Disposition` basé sur `Asset::getOriginalFileName()`, jamais
+    sur le nom de la pièce jointe du plugin. `rename()` met donc aussi à jour l'Asset
+    (`originalFileName` **et** `title`, ce dernier étant ce qui apparaît dans la section Assets native
+    de Mautic) quand `assetId` est renseigné. **Vérifié contre la vraie base locale** : un fichier
+    simple et un fichier adossé à un Asset renommés réellement, coercition d'extension dans les deux
+    sens testée, nom trop long confirmé tronqué à 191 pile, `Asset::getOriginalFileName()`/`getTitle()`
+    confirmés synchronisés après renommage — toutes les données de test nettoyées ensuite.
+- **`rename_attachment`/`delete_attachment`** (`Service/Tool/Tools/`) — l'agent a aussi accès à ce
+  que le menu "..." fait dans le navigateur, sur simple demande dans le chat ("renomme
+  export-ancien.csv en export-2026.csv", "supprime ce fichier"). Aucune logique dupliquée : les deux
+  outils appellent directement `AttachmentManager::rename()`/`delete()`, exactement le même service
+  que `FileController`. `rename_attachment` suit le mode confirmation global (comme `update_contact`,
+  réversible) ; `delete_attachment` exige toujours `confirmed: true`, **même** si le mode
+  confirmation global est désactivé (comme `delete_contact`/`delete_entity`, irréversible). Aucune
+  permission Mautic dédiée sur les deux : une pièce jointe est scopée par utilisateur
+  (`AttachmentManager::resolve()`), pas par rôle — l'appartenance elle-même est le seul contrôle
+  d'accès nécessaire, même principe que `read_attachment`/`list_attachments`.
 - **Hors scope volontaire** — pas de vision multimodale (le modèle ne "voit" jamais les pixels d'une
   image, seulement son id et son URL d'asset) : aucun des deux cas d'usage demandés (import de
   leads, image dans un email) n'en avait besoin, et ça aurait touché `Service/Llm/*` (DTO + les 4
@@ -1325,7 +1427,7 @@ outils.
 | `update_email_settings` | ● | Modifie les réglages d'un email déjà créé hors contenu/nom/publication : expéditeur, subject, preheader, UTM, texte brut, fenêtre de publication |
 | `create_landing_page` | ● | Landing page |
 | `send_test_email` | ● | Exemplaire de test, aucun contact touché |
-| `create_form` | ● | Formulaire + champs, avec mapping vers les champs contact |
+| `create_form` | ● | Formulaire + champs, avec mapping vers les champs contact ; action `witty.add_do_not_contact` disponible pour un vrai formulaire de désinscription, résistant aux bots qui suivent le lien de désinscription natif |
 | `read_form` | | Détail complet d'un formulaire existant (champs avec alias, actions avec id) — préalable à update_form |
 | `update_form` | ● | Ajoute/modifie/supprime des champs et des actions d'un formulaire déjà créé, un par un (op=add\|update\|remove) |
 | `create_segment` | ● | Segment + filtres |
@@ -1364,7 +1466,7 @@ outils.
 | `update_company` | ● | Champs d'une entreprise existante |
 | `delete_company` | ● | Suppression définitive d'une entreprise (contacts rattachés conservés), `confirmed: true` obligatoire même hors mode confirmation |
 | `manage_company_contacts` | ● | Rattache/détache un contact d'une entreprise |
-| `create_campaign` | ● | Campagne + canvas |
+| `create_campaign` | ● | Campagne : vrai graphe d'etapes (actions/decisions/conditions, embranchements oui/non), planification horaire |
 | `describe_campaign_events` | | Catalogue des événements de campagne installés |
 | `campaign_stats` | | Contacts et avancement par événement |
 | `create_asset` | ● | Asset à partir d'une URL distante (pas d'upload binaire possible depuis le chat) |
@@ -1390,6 +1492,8 @@ outils.
 | `convert_meet_recording_to_asset` | ● | Republie un enregistrement comme Asset Mautic (partageable par email) |
 | `read_attachment` | | Lit une piece jointe du chat (texte, apercu de tableur, ou URL d'asset pour image/document) |
 | `list_attachments` | | Retrouve un fichier deja envoye par son nom (bibliotheque Fichiers), pas seulement ceux du message en cours |
+| `rename_attachment` | ● | Renomme un fichier deja envoye, extension reelle toujours reappliquee automatiquement |
+| `delete_attachment` | ● | Suppression definitive d'un fichier deja envoye, `confirmed: true` obligatoire meme hors mode confirmation |
 | `import_leads_from_file` | ● | Import de contacts depuis un tableur joint, plafonne a 500 lignes, mapping de colonnes fourni par l'agent |
 | `start_contacts_import_from_file` | ● | Import de contacts depuis un tableur joint EN ARRIERE-PLAN, sans plafond de lignes, avec rattachement a un segment optionnel |
 
@@ -1479,6 +1583,56 @@ perdant son id, ses soumissions déjà reçues et ses éventuelles références 
   temporaire avec un champ et une action a confirmé, dans cette session, que `removeElement()` seul
   ne supprime pas la ligne (`orphanRemoval` bien absent) et qu'un `remove()` explicite le fait —
   données de test nettoyées ensuite.
+
+#### Action de formulaire "Ajouter en Ne Plus Contacter" (`witty.add_do_not_contact`)
+
+**Demande directe de l'utilisateur** : pouvoir construire un formulaire de désinscription
+personnalisé, plus fiable que le lien de désinscription à un clic natif de Mautic
+(`{unsubscribe_url}`), régulièrement déclenché à tort. **Cause du problème signalé, réelle et
+documentée** : un lien de désinscription à un clic n'exige aucune interaction humaine délibérée pour
+s'activer, seulement une requête HTTP GET sur son URL — or les scanners de sécurité email
+(Outlook Safe Links, proxys anti-phishing d'entreprise, certains clients mail mobiles qui
+pré-chargent les liens d'un message pour en vérifier l'innocuité) suivent tous les liens d'un email
+reçu **avant même qu'un humain ne l'ouvre**, ce qui désabonne le contact aussi sûrement qu'un vrai
+clic — un faux positif totalement invisible pour l'utilisateur concerné, qui n'a jamais rien demandé.
+Un formulaire (page réellement chargée, PUIS bouton explicitement soumis) est insensible à ce
+comportement précis : un bot qui suit un lien ne remplit et ne soumet jamais un formulaire.
+
+- **Vrai manque du cœur Mautic, pas une limitation du plugin** : `LeadBundle\EventListener\FormSubscriber`
+  expose `lead.remove_do_not_contact` (retirer un contact de Ne Plus Contacter, utile pour un
+  formulaire de réabonnement) mais **aucune action symétrique pour l'y ajouter** — vérifié en
+  parcourant tout `LeadBundle/EventListener/` : `addDncForContact()` (`Model/DoNotContact.php`)
+  n'est appelée QUE depuis une action de **campagne** (`CampaignActionDNCSubscriber`), jamais
+  depuis un formulaire.
+- **`EventListener/FormSubscriber.php`** (le `FormSubscriber` du plugin, distinct de celui du cœur
+  Mautic — celui qui porte déjà l'action `witty.create_meet_invitation_link`) enregistre une
+  nouvelle action `witty.add_do_not_contact` (même mécanisme que l'action meet, `addSubmitAction()`
+  sur `FormEvents::FORM_ON_BUILD`, exécutée sur `FormEvents::ON_EXECUTE_SUBMIT_ACTION`, filtrée par
+  `checkContext()`) qui appelle `DoNotContact::addDncForContact($lead->getId(), 'email', DNC::UNSUBSCRIBED)`
+  sur le contact identifié par `ContactTracker::getContact()`.
+- **Channel (`email`) et reason (`UNSUBSCRIBED`) fixés en dur, jamais configurables** — décision
+  de sécurité assumée : `DNC::BOUNCED`/`DNC::MANUAL` ont un sens différent côté Mautic (rapports de
+  délivrabilité, action d'un utilisateur interne) qu'il ne faut jamais laisser choisir par erreur
+  pour une action déclenchée par le contact lui-même. `Form/Type/ActionAddDoNotContactType.php` est
+  donc volontairement **vide** (aucun champ de configuration), exactement comme son inverse du cœur
+  Mautic (`Mautic\LeadBundle\Form\Type\ActionRemoveDoNotContact`, elle aussi vide) — un `formType`
+  reste obligatoire (même vide) car c'est ce que le panneau de configuration d'une action du
+  constructeur de formulaire instancie pour s'afficher.
+- **`Service/Form/FormDefinitions::ACTION_TYPES`** liste la nouvelle clé : `create_form`/`update_form`
+  l'acceptent donc automatiquement, sans aucune propriété à fournir (`FormPropertyBuilder::buildActionProperties()`
+  n'a pas eu besoin d'un nouveau cas — le `default => []` existant suffit).
+- **Vérifié de bout en bout contre la vraie base locale, via le VRAI mécanisme de dispatch de
+  Mautic** (pas seulement raisonné) : `FormModel::getCustomComponents()['actions']` confirme que le
+  builder Mautic voit bien la nouvelle action (donc bien tagué/autowire, pas juste une classe sur le
+  disque) ; un formulaire + une action réels et persistés ; un événement
+  `FormEvents::ON_EXECUTE_SUBMIT_ACTION` réellement dispatché via le vrai `event_dispatcher` du
+  conteneur (exactement ce que fait `SubmissionModel::executeFormActions()` à une vraie soumission
+  publique, `ContactTracker::setSystemContact()` — le mécanisme officiel Mautic pour forcer le
+  contact courant hors contexte HTTP — servant à simuler un visiteur déjà identifié) — le contact
+  jetable ressort bien marqué Ne Plus Contacter (`channel=email`, `reason=UNSUBSCRIBED`) en base ;
+  vérifié aussi que l'action ne plante jamais sans contact identifié (visiteur totalement anonyme,
+  simple no-op) ; toutes les données de test nettoyées ensuite (contact, formulaire, action, entrée
+  DNC, table `form_results_*` générée par Mautic pour ce formulaire).
 
 `Email::customHtml`/`Page::customHtml` sont **toujours** ce qui part réellement au
 destinataire/visiteur, quel que soit `template` — vérifié dans `MailHelper::setEmail()` (core) :
@@ -1722,6 +1876,36 @@ consigne autorise explicitement un `<br/>` pour une accroche sur deux lignes (vo
 contextes ci-dessous). Testé pour confirmer qu'un `<img onerror=...>` glissé dans le même champ
 reste neutralisé, sans casser les vraies balises `<img>` du reste de l'email (logo, visuel
 d'accroche).
+
+**Bug réel signalé en session** ("l'IA est incapable de modifier un template proprement") :
+`update_template` perdait silencieusement le `context` (`html`/`html_br`/`js`) de tout emplacement
+autre que celui explicitement modifié, à chaque appel touchant `placeholders`. Cause trouvée en
+retraçant le chemin lecture → écriture que suit forcément l'agent (`update_template` exige un
+remplacement **intégral** du tableau `placeholders`, donc il doit d'abord le relire via
+`list_email_templates`/`list_page_templates` avant de le renvoyer modifié) :
+`WittyTemplate::describePlaceholders()` (ce que ces deux outils exposent) **n'incluait jamais**
+`context` dans sa sortie, alors que `TemplateManager::normalizePlaceholders()` (ce qu'`update_template`/
+`create_template` appliquent en entrée) retombe sur `'html'` par défaut si absent — un aller-retour,
+même pour modifier un seul champ d'un seul emplacement, effaçait donc le contexte réel de **tous les
+autres**. Concrètement : un emplacement en contexte `js` (ex. `confirmation-webinar`, 9 sur 37)
+récupérait après coup l'échappement HTML au lieu du JS, cassant le script généré ; un `html_br`
+(comme `HOOK` ci-dessus) perdait son `<br/>` littéral, réputé illisible. Le bug ne touchait que le
+chemin agent : `Controller/TemplateController.php` (édition depuis l'UI) lit `getPlaceholders()`
+directement (le tableau brut stocké), jamais `describePlaceholders()`, donc jamais affecté.
+
+Corrigé des deux côtés : `describePlaceholders()` inclut désormais toujours `context` explicitement
+(y compris la valeur par défaut `'html'`, jamais omise) ; `TemplateManager::normalizePlaceholders()`
+ne garde en plus **que** les champs réellement stockés (`key`/`label`/`guidance`/`example`/`default`/
+`context`) — défense en profondeur contre un champ **calculé** comme `required` (renvoyé par
+`describePlaceholders()` pour indiquer si un emplacement est obligatoire, jamais stocké) que l'agent
+recopierait tel quel : le persister aurait fini par diverger de sa vraie valeur dès qu'un `default`
+est ajouté/retiré ensuite, puisque rien ne le relit jamais depuis le stockage. Une valeur de
+`context` invalide (autre que `html`/`html_br`/`js`) retombe aussi proprement sur `html` plutôt que
+d'être stockée telle quelle. **Vérifié contre la vraie base locale** : le scénario exact du bug
+rejoué sur une copie jetable de `confirmation-webinar` (jamais le vrai template) — lecture via
+`list_page_templates`, un seul champ modifié, écriture via `update_template` — confirme que les 9
+emplacements `js` et 3 `html_br` survivent intacts après le correctif (0/37 perdus, contre 12/37
+avant), la modification demandée bien appliquée, et le vrai template de production intact.
 
 ### Détails spécifiques à la landing page
 

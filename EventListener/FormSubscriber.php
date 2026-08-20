@@ -7,7 +7,10 @@ namespace MauticPlugin\WittyBundle\EventListener;
 use Mautic\FormBundle\Event\FormBuilderEvent;
 use Mautic\FormBundle\Event\SubmissionEvent;
 use Mautic\FormBundle\FormEvents;
+use Mautic\LeadBundle\Entity\DoNotContact as DNC;
+use Mautic\LeadBundle\Model\DoNotContact;
 use Mautic\LeadBundle\Tracker\ContactTracker;
+use MauticPlugin\WittyBundle\Form\Type\ActionAddDoNotContactType;
 use MauticPlugin\WittyBundle\Form\Type\CreateMeetInvitationLinkActionType;
 use MauticPlugin\WittyBundle\Form\Type\MeetSlotPickerPropertiesType;
 use MauticPlugin\WittyBundle\Service\PlugNmeet\Exception\PlugNmeetException;
@@ -34,9 +37,27 @@ class FormSubscriber implements EventSubscriberInterface
 
     public const SLOT_PICKER_FIELD_TYPE = 'witty.meet_slot_picker';
 
+    // Action "Ajouter en Ne Plus Contacter" (public, meme raison que
+    // ACTION_KEY ci-dessus). Mautic core n'expose QUE l'inverse
+    // (LeadBundle\EventListener\FormSubscriber::onFormSubmitActionRemoveFromDoNotContact,
+    // action 'lead.remove_do_not_contact') : aucune action de formulaire
+    // native pour AJOUTER un contact en DNC, seulement le lien de
+    // desinscription automatique {unsubscribe_url} glisse dans les emails.
+    // Ce lien pose un vrai probleme de fiabilite en production (rapporte en
+    // session) : les scanners de securite email (Outlook Safe Links,
+    // proxys anti-phishing d'entreprise...) suivent/pre-chargent chaque lien
+    // d'un email recu AVANT meme que le destinataire humain ne l'ouvre, pour
+    // en verifier l'innocuite -- ce qui declenche le lien de desinscription
+    // a un clic aussi surement qu'un vrai clic humain, desabonnant des
+    // contacts qui n'ont jamais rien demande. Un formulaire (page reelle a
+    // charger PUIS bouton a soumettre) est resistant a ce comportement
+    // precis : un bot qui suit un lien ne remplit jamais un formulaire.
+    public const DNC_ACTION_KEY = 'witty.add_do_not_contact';
+
     public function __construct(
         private MeetInvitationCreator $creator,
         private ContactTracker $contactTracker,
+        private DoNotContact $doNotContact,
         private LoggerInterface $logger,
     ) {
     }
@@ -45,7 +66,10 @@ class FormSubscriber implements EventSubscriberInterface
     {
         return [
             FormEvents::FORM_ON_BUILD            => ['onFormBuilder', 0],
-            FormEvents::ON_EXECUTE_SUBMIT_ACTION => ['onSubmitActionCreateInvitation', 0],
+            FormEvents::ON_EXECUTE_SUBMIT_ACTION => [
+                ['onSubmitActionCreateInvitation', 0],
+                ['onSubmitActionAddDoNotContact', 0],
+            ],
         ];
     }
 
@@ -56,6 +80,14 @@ class FormSubscriber implements EventSubscriberInterface
             'label'       => 'mautic.witty.meet.action.create_invitation',
             'description' => 'mautic.witty.meet.action.create_invitation_descr',
             'formType'    => CreateMeetInvitationLinkActionType::class,
+            'eventName'   => FormEvents::ON_EXECUTE_SUBMIT_ACTION,
+        ]);
+
+        $event->addSubmitAction(self::DNC_ACTION_KEY, [
+            'group'       => 'mautic.witty.lead.submitaction',
+            'label'       => 'mautic.witty.lead.action.add_do_not_contact',
+            'description' => 'mautic.witty.lead.action.add_do_not_contact_descr',
+            'formType'    => ActionAddDoNotContactType::class,
             'eventName'   => FormEvents::ON_EXECUTE_SUBMIT_ACTION,
         ]);
 
@@ -103,5 +135,31 @@ class FormSubscriber implements EventSubscriberInterface
                 'exception' => $e->getMessage(),
             ]);
         }
+    }
+
+    /**
+     * Channel et reason volontairement fixes (jamais configurables depuis le
+     * formulaire ni par l'agent) : 'email' est le seul canal concerne par un
+     * formulaire de desinscription, et DNC::UNSUBSCRIBED est la SEULE raison
+     * correcte pour une action initiee par le contact lui-meme -- BOUNCED/
+     * MANUAL ont un sens different cote Mautic (rapports de deliverabilite,
+     * action d'un utilisateur interne) qu'il ne faut jamais laisser choisir
+     * par erreur. Aucune propriete a configurer : ActionAddDoNotContactType
+     * est volontairement vide, comme l'action inverse du coeur Mautic
+     * (Mautic\LeadBundle\Form\Type\ActionRemoveDoNotContact).
+     */
+    public function onSubmitActionAddDoNotContact(SubmissionEvent $event): void
+    {
+        if (false === $event->checkContext(self::DNC_ACTION_KEY)) {
+            return;
+        }
+
+        $lead = $this->contactTracker->getContact();
+
+        if (null === $lead) {
+            return;
+        }
+
+        $this->doNotContact->addDncForContact($lead->getId(), 'email', DNC::UNSUBSCRIBED);
     }
 }

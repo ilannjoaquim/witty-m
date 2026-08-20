@@ -40,6 +40,12 @@ class CreateFormTool extends AbstractTool
             .'le contact choisit un creneau, une salle plugNmeet dediee est creee a la volee et le lien d invitation est genere. '
             .'Combine avec email.send.lead, on peut aussi envoyer un email de confirmation Mautic existant a la soumission, et avec '
             .'email.send.user notifier une ou plusieurs personnes de l equipe (ex. prevenir un commercial d une nouvelle prise de rendez-vous). '
+            .'L action '.FormSubscriber::DNC_ACTION_KEY.' marque le contact en Ne Plus Contacter '
+            .'(email) a la soumission : a proposer pour un formulaire de desinscription PERSONNALISE, plus fiable que le lien de '
+            .'desinscription a un clic natif de Mautic ({unsubscribe_url} dans un email) — les scanners de securite email suivent/'
+            .'pre-chargent les liens avant meme qu un humain ne les ouvre, ce qui declenche ce lien automatiquement et desabonne des '
+            .'contacts qui n ont jamais rien demande ; un vrai formulaire (page chargee puis bouton soumis) y est insensible. Aucune '
+            .'propriete a fournir pour cette action (channel/reason fixes en dur, jamais configurables). '
             .'Pour modifier un formulaire DEJA cree (champs/actions), utilise update_form, jamais create_form a nouveau.';
     }
 

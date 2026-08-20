@@ -29,7 +29,8 @@
 <div id="witty-file-app"
      data-data-endpoint="{{ path('witty_files_data') }}"
      data-upload-endpoint="{{ path('witty_files_upload') }}"
-     data-delete-endpoint="{{ path('witty_files_delete') }}">
+     data-delete-endpoint="{{ path('witty_files_delete') }}"
+     data-rename-endpoint="{{ path('witty_files_rename') }}">
 
     <p class="text-muted">{{ 'mautic.witty.file.intro'|trans }}</p>
 
@@ -139,6 +140,18 @@
                 ? '<a href="' + file.assetUrl + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(file.filename) + '</a>'
                 : escapeHtml(file.filename);
 
+            // Meme convention visuelle que les listings natifs Mautic
+            // (ex. LeadBundle/Resources/views/Field/list.html.twig) : un
+            // bouton fantome "..." (ri-more-2-line) qui ouvre un
+            // dropdown-menu Bootstrap. Aucun cablage JS supplementaire
+            // necessaire pour l'ouverture/fermeture : le plugin dropdown de
+            // Bootstrap 3 (deja charge globalement par Mautic) delegue ses
+            // clics au niveau du document, donc fonctionne aussi sur du HTML
+            // injecte dynamiquement comme ici.
+            var downloadItem = file.assetUrl
+                ? '<li><a href="' + file.assetUrl + '" target="_blank" rel="noopener noreferrer"><i class="ri-download-2-line" aria-hidden="true"></i> {{ 'mautic.witty.file.download'|trans|e('js') }}</a></li>'
+                : '';
+
             return '' +
                 '<tr>' +
                     '<td>' + nameCell + '</td>' +
@@ -147,9 +160,17 @@
                     '<td>' + formatDate(file.dateAdded) + '</td>' +
                     '<td>' + file.id + '</td>' +
                     '<td class="text-right">' +
-                        '<button type="button" class="btn btn-ghost btn-nospin" data-action="delete" data-id="' + file.id + '" title="{{ 'mautic.core.form.delete'|trans|e('js') }}">' +
-                            '<i class="ri-delete-bin-line" aria-hidden="true"></i>' +
-                        '</button>' +
+                        '<div class="dropdown">' +
+                            '<button type="button" class="btn btn-ghost btn-nospin" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false" title="{{ 'mautic.witty.file.actions'|trans|e('js') }}">' +
+                                '<i class="ri-more-2-line" aria-hidden="true"></i>' +
+                            '</button>' +
+                            '<ul class="dropdown-menu dropdown-menu-right" role="menu">' +
+                                '<li><a href="#" data-action="rename" data-id="' + file.id + '"><i class="ri-edit-line" aria-hidden="true"></i> {{ 'mautic.witty.file.rename'|trans|e('js') }}</a></li>' +
+                                downloadItem +
+                                '<li class="divider"></li>' +
+                                '<li><a href="#" data-action="delete" data-id="' + file.id + '" class="text-danger"><i class="ri-delete-bin-line" aria-hidden="true"></i> {{ 'mautic.core.form.delete'|trans|e('js') }}</a></li>' +
+                            '</ul>' +
+                        '</div>' +
                     '</td>' +
                 '</tr>';
         }).join('');
@@ -170,7 +191,10 @@
             '</div>';
 
         list.querySelectorAll('[data-action="delete"]').forEach(function (el) {
-            el.addEventListener('click', function () { deleteFile(el.dataset.id); });
+            el.addEventListener('click', function (e) { e.preventDefault(); deleteFile(el.dataset.id); });
+        });
+        list.querySelectorAll('[data-action="rename"]').forEach(function (el) {
+            el.addEventListener('click', function (e) { e.preventDefault(); renameFile(el.dataset.id); });
         });
     }
 
@@ -198,6 +222,26 @@
         if (!window.confirm('{{ 'mautic.witty.file.delete_confirm'|trans|e('js') }} (' + (file ? file.filename : id) + ')')) { return; }
 
         fetch(app.dataset.deleteEndpoint, { method: 'POST', headers: headersForm(), body: new URLSearchParams({ id: id }) })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                if (!data.status) { window.alert(data.msg || 'Erreur'); return; }
+                loadFiles();
+            });
+    }
+
+    function renameFile(id) {
+        var file = filesById[id];
+        var current = file ? file.filename : '';
+        var next = window.prompt('{{ 'mautic.witty.file.rename_prompt'|trans|e('js') }}', current);
+
+        // null = Annuler ; chaine identique = rien a faire.
+        if (null === next || next === current) { return; }
+
+        fetch(app.dataset.renameEndpoint, {
+            method: 'POST',
+            headers: headersForm(),
+            body: new URLSearchParams({ id: id, filename: next })
+        })
             .then(function (r) { return r.json(); })
             .then(function (data) {
                 if (!data.status) { window.alert(data.msg || 'Erreur'); return; }
